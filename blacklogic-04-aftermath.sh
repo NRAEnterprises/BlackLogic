@@ -1,6 +1,7 @@
 #!/bin/bash
 set -uo pipefail
 MOUNT_DIR="/mnt/blackarch"; VG_NAME="black_vg"; POOL_NAME="black_pool"
+log() { echo "[$(date +%H:%M:%S)] $*"; }
 echo "=== Stage 4: Aftermath ==="
 if ! mountpoint -q "$MOUNT_DIR"; then
     ROOT_LV=$(lvs --noheadings -o lv_name "$VG_NAME" 2>/dev/null | grep -v "$POOL_NAME" | grep -v "\[" | head -n1 | tr -d ' ' || true)
@@ -13,7 +14,7 @@ if [ -f /usr/local/bin/black_aftermath.sh ]; then
     cp /usr/local/bin/black_aftermath.sh "$MOUNT_DIR/root/black_aftermath.sh"
     arch-chroot "$MOUNT_DIR" /bin/bash -c "bash /root/black_aftermath.sh" || echo "WARNING: Aftermath script had errors."
 fi
-echo "Unmounting and rebooting..."
+log "Unmounting and rebooting..."
 umount -R "$MOUNT_DIR" 2>/dev/null || true
 sleep 5
 reboot
