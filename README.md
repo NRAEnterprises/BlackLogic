@@ -91,7 +91,7 @@ Use this project at your own risk. These scripts are intentionally aggressive wi
 
 ## License
 
-This project currently does not include an explicit license file. If you plan to redistribute or publicly use it, confirm the legal licensing terms before doing so.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
