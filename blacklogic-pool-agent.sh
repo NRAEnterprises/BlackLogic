@@ -14,6 +14,8 @@ LOCK_FILE="/tmp/blacklogic-pool-agent.lock"
 MAX_PART_WAIT="30"
 
 log() { echo "[$(date +%F_%T)] $*" | tee -a "$LOG_FILE"; }
+warn() { echo "[$(date +%F_%T)] WARNING: $*" | tee -a "$LOG_FILE" >&2; }
+fail() { echo "[$(date +%F_%T)] FATAL: $*" | tee -a "$LOG_FILE" >&2; exit 1; }
 
 [ -f "$STATE_FILE" ] && source "$STATE_FILE"
 export LIVE_DRIVE

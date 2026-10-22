@@ -8,6 +8,8 @@ MOUNT_DIR="/mnt/blackarch"
 STATE_FILE="/tmp/blacklogic-state"
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
+warn() { echo "[$(date +%H:%M:%S)] WARNING: $*" >&2; }
+fail() { echo "[$(date +%H:%M:%S)] FATAL: $*" >&2; exit 1; }
 
 [ -f "$STATE_FILE" ] && source "$STATE_FILE"
 

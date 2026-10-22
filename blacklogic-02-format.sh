@@ -12,7 +12,9 @@ LOCK_FILE="/tmp/blacklogic-format.lock"
 MAX_PART_WAIT="60"
 
 mkdir -p /tmp
-: > "$PROGRESS_FILE"
+: > ""
+warn() { echo "WARNING: $*" >&2; }
+fail() { echo "FATAL: $*" >&2; exit 1; }
 
 # Prevent concurrent execution
 exec 9>"$LOCK_FILE"
@@ -269,5 +271,3 @@ done
 [ "$SUCCESS" -eq 0 ] && { echo "No drives formatted."; exit 1; }
 echo "Format complete. Most drive space left unpartitioned for agent-driven expansion."
 exit 0
-EOF
-bash -n blacklogic-02-format.sh && echo "syntax OK"
