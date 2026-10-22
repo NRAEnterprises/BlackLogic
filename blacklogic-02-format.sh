@@ -8,9 +8,18 @@ CHUNK_SIZE="1G"
 STATE_FILE="/tmp/blacklogic-state"
 PROGRESS_FILE="/tmp/blacklogic-progress"
 STARTING_POOL_GIB="64"
+LOCK_FILE="/tmp/blacklogic-format.lock"
+MAX_PART_WAIT="60"
 
 mkdir -p /tmp
 : > "$PROGRESS_FILE"
+
+# Prevent concurrent execution
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+    echo "Another format instance is running. Exiting."
+    exit 1
+fi
 
 record_drive_done() {
     local d="$1"
@@ -28,6 +37,39 @@ make_uuid() {
     local hex seed="$1"
     hex=$(printf '%s' "$seed" | sha256sum | cut -c1-32)
     printf '%s-%s-%s-%s-%s' "${hex:0:8}" "${hex:8:4}" "${hex:12:4}" "${hex:16:4}" "${hex:20:12}"
+}
+
+clear_foreign_signatures() {
+    local dev="$1"
+    mdadm --zero-superblock "$dev" 2>/dev/null || true
+    zpool labelclear -f "$dev" 2>/dev/null || true
+    dmraid -r -E "$dev" 2>/dev/null || true
+    wipefs -a "$dev" 2>/dev/null || true
+    dd if=/dev/zero of="$dev" bs=1M count=10 conv=fsync 2>/dev/null || true
+    dd if=/dev/zero of="$dev" bs=1M seek=$(($(blockdev --getsz "$dev" 2>/dev/null || echo 0) / 2048 - 10)) count=10 conv=fsync 2>/dev/null || true
+}
+
+wait_for_partition() {
+    local part="$1" max="$2" i=0
+    while [ "$i" -lt "$max" ]; do
+        [ -b "$part" ] && return 0
+        udevadm settle 2>/dev/null || true
+        partprobe "$(echo "$part" | sed 's/[0-9]*$//;s/p$//')" 2>/dev/null || true
+        sleep 1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+disk_healthy() {
+    local dev="$1"
+    if command -v smartctl >/dev/null 2>&1; then
+        smartctl -H "$dev" 2>/dev/null | grep -qi "PASSED" || return 1
+    fi
+    local sz
+    sz=$(blockdev --getsize64 "$dev" 2>/dev/null || echo 0)
+    [ "$sz" -ge 1073741824 ] || return 1
+    return 0
 }
 
 echo "=== Stage 2: Drive Formatting ==="
@@ -103,6 +145,8 @@ while IFS= read -r DEV_NAME; do
     SIZE=$(blockdev --getsize64 "$DEV" 2>/dev/null || echo 0)
     [ "$SIZE" -lt 1000000000 ] && continue
 
+    disk_healthy "$DEV" || { echo "$DEV failed health check. Skipping."; continue; }
+
     IN_VG=0
     while IFS= read -r PV; do
         [ -z "$PV" ] && continue
@@ -132,10 +176,24 @@ for D in "${DRIVES[@]}"; do
     IFS='|' read -r DEV CLASS <<< "$D"
     echo "Formatting unclaimed drive $DEV (class $CLASS)..."
 
-    wipefs -a "$DEV" 2>/dev/null || { echo "wipefs failed on $DEV; skipping."; continue; }
+    # Unmount any stale mounts on this device
+    for mp in $(lsblk -n -o MOUNTPOINT "$DEV" 2>/dev/null); do
+        [ -n "$mp" ] && [ "$mp" != "/" ] && umount -l "$mp" 2>/dev/null || true
+    done
+    swapoff "$DEV" 2>/dev/null || true
+    for p in $(lsblk -n -o NAME "$DEV" 2>/dev/null); do
+        [ -n "$p" ] && swapoff "/dev/$p" 2>/dev/null || true
+    done
+
+    clear_foreign_signatures "$DEV"
     sleep 1
 
-    parted -s "$DEV" unit MiB mklabel gpt 2>/dev/null || { echo "parted mklabel failed on $DEV; skipping."; continue; }
+    if ! parted -s "$DEV" unit MiB mklabel gpt 2>/dev/null; then
+        echo "parted mklabel failed on $DEV; retrying after signature clear."
+        clear_foreign_signatures "$DEV"
+        sleep 2
+        parted -s "$DEV" unit MiB mklabel gpt 2>/dev/null || { echo "parted mklabel failed on $DEV; skipping."; continue; }
+    fi
     sleep 1
 
     PS=""
@@ -164,18 +222,23 @@ for D in "${DRIVES[@]}"; do
         mkfs.btrfs -L black-surgery -f "${DEV}${PS}3" >/dev/null 2>&1 || true
     fi
 
-    partprobe "$DEV" 2>/dev/null || true
-    for i in $(seq 1 20); do [ -b "$LVM_PART" ] && break; sleep 1; done
-    [ ! -b "$LVM_PART" ] && { echo "Partition node missing."; continue; }
+    if ! wait_for_partition "$LVM_PART" "$MAX_PART_WAIT"; then
+        echo "Partition node missing: $LVM_PART"
+        continue
+    fi
 
     SERIAL=$(lsblk -no SERIAL "$DEV" 2>/dev/null | head -n1 | tr -d ' ' || true)
     [ -z "$SERIAL" ] && SERIAL="$DEV_NAME"
     PV_UUID=$(make_uuid "${SERIAL}-${LVM_PART}")
 
-    if ! pvcreate -ff -y --uuid "$PV_UUID" "$LVM_PART" 2>/dev/null; then
-        echo "pvcreate failed on $LVM_PART; retrying without explicit UUID."
-        pvcreate -ff -y "$LVM_PART" 2>/dev/null || { echo "pvcreate failed on $LVM_PART"; continue; }
+    pv_ok=0
+    if pvcreate -ff -y --uuid "$PV_UUID" "$LVM_PART" 2>/dev/null; then
+        pv_ok=1
+    else
+        echo "pvcreate with UUID failed on $LVM_PART; retrying with random UUID."
+        pvcreate -ff -y "$LVM_PART" 2>/dev/null && pv_ok=1
     fi
+    [ "$pv_ok" -eq 0 ] && { echo "pvcreate failed on $LVM_PART"; continue; }
 
     pvresize "$LVM_PART" 2>/dev/null || true
 
