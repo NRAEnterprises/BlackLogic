@@ -5,9 +5,10 @@ VG_NAME="black_vg"
 POOL_NAME="black_pool"
 POOL_VOL_NAME="root"
 MOUNT_DIR="/mnt/blackarch"
+LOG_FILE="/var/log/blacklogic-install.log"
 STATE_FILE="/tmp/blacklogic-state"
 
-log() { echo "[$(date +%H:%M:%S)] $*"; }
+log() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG_FILE"; }
 warn() { echo "[$(date +%H:%M:%S)] WARNING: $*" >&2; }
 fail() { echo "[$(date +%H:%M:%S)] FATAL: $*" >&2; exit 1; }
 

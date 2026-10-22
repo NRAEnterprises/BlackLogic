@@ -6,14 +6,16 @@ POOL_NAME="black_pool"
 NEW_SIZE="15.00PiB"
 CHUNK_SIZE="1G"
 STATE_FILE="/tmp/blacklogic-state"
+LOG_FILE="/var/log/blacklogic-format.log"
 PROGRESS_FILE="/tmp/blacklogic-progress"
 STARTING_POOL_GIB="64"
 LOCK_FILE="/tmp/blacklogic-format.lock"
 MAX_PART_WAIT="60"
 
 mkdir -p /tmp
-: > ""
+: > "$PROGRESS_FILE"
 warn() { echo "WARNING: $*" >&2; }
+log() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG_FILE"; }
 fail() { echo "FATAL: $*" >&2; exit 1; }
 
 # Prevent concurrent execution
