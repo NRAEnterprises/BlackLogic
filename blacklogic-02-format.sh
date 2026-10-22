@@ -45,11 +45,6 @@ if vgs "$VG_NAME" &>/dev/null; then
 
     if [ -n "${ROOT_LV:-}" ] && [ -b "/dev/$VG_NAME/$ROOT_LV" ]; then
         echo "Existing pool found: /dev/$VG_NAME/$ROOT_LV"
-        VG_FREE=$(vgs --noheadings -o vg_free_count "$VG_NAME" 2>/dev/null | tr -d ' ' || echo "0")
-        if [ "$VG_FREE" -gt 10 ]; then
-            echo "VG has $VG_FREE free extents. Leaving pool growth to dedicated LVM agent logic."
-        fi
-
         echo "Scanning for unclaimed drives..."
         NEED_FORMAT=0
         while IFS= read -r DEV_NAME; do
@@ -90,10 +85,12 @@ while IFS= read -r DEV_NAME; do
     [ -z "$DEV_NAME" ] && continue
     [[ "$DEV_NAME" == "$LIVE_DRIVE" ]] && continue
     DEV="/dev/$DEV_NAME"
+
     if is_drive_done "$DEV"; then
         echo "$DEV already recorded as formatted. Skipping."
         continue
     fi
+
     lsblk -n -o MOUNTPOINT "$DEV" 2>/dev/null | grep -q "/" && continue
     SIZE=$(blockdev --getsize64 "$DEV" 2>/dev/null || echo 0)
     [ "$SIZE" -lt 1000000000 ] && continue
@@ -135,6 +132,7 @@ for D in "${DRIVES[@]}"; do
 
     PS=""
     [[ "$DEV" == *nvme* ]] && PS="p"
+
     if [ "$CLASS" -eq 10 ]; then
         parted -s "$DEV" unit MiB mkpart black-pool 1MiB 100% >/dev/null 2>&1 || { echo "Failed creating pool partition on $DEV"; continue; }
         LVM_PART="${DEV}${PS}1"
@@ -170,6 +168,7 @@ for D in "${DRIVES[@]}"; do
         echo "pvcreate failed on $LVM_PART; retrying without explicit UUID."
         pvcreate -ff -y "$LVM_PART" 2>/dev/null || { echo "pvcreate failed on $LVM_PART"; continue; }
     fi
+
     pvresize "$LVM_PART" 2>/dev/null || true
 
     if vgs "$VG_NAME" &>/dev/null; then
@@ -189,6 +188,7 @@ for D in "${DRIVES[@]}"; do
         echo "lvcreate root LV failed on $DEV"
         continue
     fi
+
     mkfs.btrfs -f "/dev/$VG_NAME/black_drive$NEXT" >/dev/null 2>&1 || true
     record_drive_done "$DEV"
     echo "  $DEV -> black_drive$NEXT"
