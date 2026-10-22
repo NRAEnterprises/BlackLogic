@@ -36,6 +36,32 @@ This is especially useful when working with a custom Arch installation layout th
 - `black_surgery.sh` — surgical recovery/maintenance helper
 - `black_aftermath.sh` — legacy aftermath workflow
 
+## Quick Start
+
+1. Boot into a live Arch environment as root.
+2. Confirm the target disks and partitions you want to overwrite.
+3. Review the scripts to ensure they match your hardware and install plan.
+4. Run the full pipeline:
+
+```bash
+bash /path/to/blacklogic.sh
+```
+
+If you want to run a single stage without the orchestrator, you can execute the scripts directly in order:
+
+```bash
+bash blacklogic-01-env.sh
+bash blacklogic-02-format.sh
+bash blacklogic-03-install.sh
+bash blacklogic-04-aftermath.sh
+```
+
+For a manual build flow, use:
+
+```bash
+bash black_build.sh
+```
+
 ## Typical workflow
 
 1. Boot into a live Arch environment as root.
