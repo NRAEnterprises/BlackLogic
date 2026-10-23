@@ -4,7 +4,7 @@ set -Eeuo pipefail
 VG_NAME="black_vg"
 POOL_NAME="black_pool"
 MOUNT_DIR="/mnt/blackarch"
-NEW_SIZE="4.00GiB"
+NEW_SIZE="15.00PiB"
 CHUNK_SIZE="1G"
 
 if [ "$(id -u)" -ne 0 ]; then
