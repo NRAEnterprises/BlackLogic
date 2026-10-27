@@ -1,7 +1,7 @@
 #!/bin/bash
 set -uo pipefail
 LOG_FILE="/var/log/blacklogic.log"
-SCRIPT_DIR="/usr/local/bin"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$(dirname "$LOG_FILE")"; touch "$LOG_FILE"
 log() { echo "$*" | tee -a "$LOG_FILE"; }
 log "========================================"
