@@ -149,7 +149,7 @@ while IFS= read -r DEV_NAME; do
     SIZE=$(blockdev --getsize64 "$DEV" 2>/dev/null || echo 0)
     [ "$SIZE" -lt 1000000000 ] && continue
 
-    disk_healthy "$DEV" || { echo "$DEV failed health check. Skipping."; continue; }
+    disk_healthy "$DEV" || { echo "$DEV failed health check (non-fatal, continuing)."; }
 
     IN_VG=0
     while IFS= read -r PV; do
@@ -189,6 +189,8 @@ for D in "${DRIVES[@]}"; do
         [ -n "$p" ] && swapoff "/dev/$p" 2>/dev/null || true
     done
 
+    fuser -k -9 "$DEV" 2>/dev/null || true
+    for p in $(lsblk -n -o NAME "$DEV" 2>/dev/null); do fuser -k -9 "/dev/$p" 2>/dev/null || true; done
     clear_foreign_signatures "$DEV"
     sleep 1
 
