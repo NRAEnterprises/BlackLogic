@@ -29,6 +29,8 @@ This is especially useful when working with a custom Arch installation layout th
 - `blacklogic-02-format.sh` — disk formatting and LVM/Btrfs preparation
 - `blacklogic-03-install.sh` — Arch bootstrap, package install, GRUB setup
 - `blacklogic-04-aftermath.sh` — final post-install cleanup and verification
+- `blacklogic-pool-agent.sh` — intelligent thin-pool monitoring and dynamic expansion agent
+- `blacklogic-ensure-tools.sh` — shared dependency installer (network + USB fallback)
 - `blacklogic-fix-drives.sh` — repair helper for drive/partition problems
 - `blacklogic-fix-mount.sh` — remount and recovery helper
 - `blacklogic-fix-network.sh` — network configuration recovery helper
@@ -102,6 +104,13 @@ This project assumes a custom, Arch-focused layout with:
 - optional `surgery_vg` and `black_vg` layout for resilient recovery workflows
 
 Because the scripts write and modify partition tables, LVM metadata, and boot configuration, they are destructive by design and should only be run against test systems or systems you explicitly intend to reformat.
+
+## New features
+
+- **Pool agent**: The `blacklogic-pool-agent.sh` runs as a systemd timer (installed automatically) to monitor thin-pool usage and dynamically expand storage from unpartitioned drive space or new drives.
+- **Tool auto-install**: All scripts source `blacklogic-ensure-tools.sh` which automatically installs missing dependencies via network (pacman/apt/dnf/yum) with USB device fallback.
+- **Aggressive environment lockdown**: Stage 1 kills desktop environments, display managers, and locks the session for uninterrupted installation.
+- **Location-independent**: The orchestrator resolves sibling scripts relative to its own path.
 
 ## Prerequisites
 
