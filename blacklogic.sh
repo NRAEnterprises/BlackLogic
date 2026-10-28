@@ -1,7 +1,9 @@
 #!/bin/bash
 set -uo pipefail
-LOG_FILE="/var/log/blacklogic.log"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
+ensure_tools bash 2>/dev/null || true
+LOG_FILE="/var/log/blacklogic.log"
 mkdir -p "$(dirname "$LOG_FILE")"; touch "$LOG_FILE"
 log() { echo "$*" | tee -a "$LOG_FILE"; }
 log "========================================"
