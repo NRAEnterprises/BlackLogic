@@ -11,6 +11,7 @@ echo "Init: $HOST_INIT | DM: ${HOST_DM:-none}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
+require_root
 ensure_tools fuser pkill systemctl modprobe swapon mkswap setterm xset 2>/dev/null || true
 
 # Aggressively kill all desktop environments and GUI processes

@@ -45,3 +45,10 @@ ensure_tools() {
     echo "FATAL: Could not install:$missing" >&2
     return 1
 }
+
+require_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "FATAL: This script must run as root. Use: sudo bash $0" >&2
+        exit 1
+    fi
+}
