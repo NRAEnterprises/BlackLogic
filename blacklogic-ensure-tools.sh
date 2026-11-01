@@ -1,4 +1,10 @@
 #!/bin/bash
+# Shared dependency installer for BlackLogic
+# Usage: ensure_tools <cmd1> <cmd2> ...
+# Primary fallback: network install via pacman/apt/dnf/yum
+# Secondary fallback: USB device search for installable packages
+# Only fails if all methods are exhausted
+
 ensure_tools() {
     local missing=""
     for cmd in "$@"; do
@@ -6,6 +12,8 @@ ensure_tools() {
     done
     [ -z "$missing" ] && return 0
     echo "Missing tools:$missing - attempting install..."
+
+    # Primary: network install
     if command -v pacman >/dev/null 2>&1; then
         pacman -Sy --noconfirm 2>/dev/null || true
         pacman -S --noconfirm --needed $missing 2>/dev/null && return 0
@@ -17,6 +25,8 @@ ensure_tools() {
     elif command -v yum >/dev/null 2>&1; then
         yum install -y $missing 2>/dev/null && return 0
     fi
+
+    # Secondary: USB device search
     for usb in /dev/sd* /dev/sr*; do
         [ -b "$usb" ] || continue
         mkdir -p /tmp/usbtool 2>/dev/null
@@ -31,6 +41,7 @@ ensure_tools() {
         done
         umount /tmp/usbtool 2>/dev/null || true
     done
+
     echo "FATAL: Could not install:$missing" >&2
     return 1
 }
