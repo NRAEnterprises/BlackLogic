@@ -2,7 +2,7 @@
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
-ensure_tools grub mkfs.fat mkfs.btrfs parted btrfs 2>/dev/null || true
+ensure_tools grub mkfs.fat mkfs.btrfs parted btrfs arch-chroot pacman mkinitcpio locale-gen efibootmgr grub-install grub-mkconfig wget tar zstd mount umount 2>/dev/null || true
 
 VG_NAME="black_vg"
 POOL_NAME="black_pool"
@@ -116,6 +116,7 @@ fi
 
 if [ -f /usr/local/bin/blacklogic-pool-agent.sh ]; then
     cp /usr/local/bin/blacklogic-pool-agent.sh "$MOUNT_DIR/usr/local/bin/blacklogic-pool-agent.sh" 2>/dev/null || true
+    cp /usr/local/bin/blacklogic-ensure-tools.sh "$MOUNT_DIR/usr/local/bin/blacklogic-ensure-tools.sh" 2>/dev/null || true
     chmod +x "$MOUNT_DIR/usr/local/bin/blacklogic-pool-agent.sh" 2>/dev/null || true
     arch-chroot "$MOUNT_DIR" /bin/bash -c '
         cat > /etc/systemd/system/blacklogic-pool-agent.service <<EOF

@@ -29,6 +29,7 @@ This is especially useful when working with a custom Arch installation layout th
 - `blacklogic-02-format.sh` — disk formatting and LVM/Btrfs preparation
 - `blacklogic-03-install.sh` — Arch bootstrap, package install, GRUB setup
 - `blacklogic-04-aftermath.sh` — final post-install cleanup and verification
+- `blacklogic-keep-awake.sh` — keep-awake lock (prevents sleep, dim, screen savers)
 - `blacklogic-pool-agent.sh` — intelligent thin-pool monitoring and dynamic expansion agent
 - `blacklogic-ensure-tools.sh` — shared dependency installer (network + USB fallback)
 - `blacklogic-fix-drives.sh` — repair helper for drive/partition problems

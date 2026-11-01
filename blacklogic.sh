@@ -2,7 +2,7 @@
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
-ensure_tools bash 2>/dev/null || true
+ensure_tools bash fuser pkill systemctl modprobe swapon mkswap parted wipefs pvcreate vgcreate vgextend lvcreate lvextend mkfs.fat mkfs.btrfs partprobe blkid lsblk jq blockdev udevadm lvs vgs pvs mount umount findmnt wget tar zstd 2>/dev/null || true
 LOG_FILE="/var/log/blacklogic.log"
 mkdir -p "$(dirname "$LOG_FILE")"; touch "$LOG_FILE"
 log() { echo "$*" | tee -a "$LOG_FILE"; }
@@ -10,6 +10,8 @@ log "========================================"
 log "      BLACKLOGIC ORCHESTRATOR"
 log "      $(date)"
 log "========================================"
+log ">>> Keep-Awake Lock"
+"$SCRIPT_DIR/blacklogic-keep-awake.sh" 2>&1 | tee -a "$LOG_FILE" || true
 log ">>> Stage 1: Environment"
 "$SCRIPT_DIR/blacklogic-01-env.sh" 2>&1 | tee -a "$LOG_FILE" || { log "FATAL: Env."; exit 1; }
 log ">>> Stage 2: Format"

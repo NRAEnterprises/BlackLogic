@@ -9,12 +9,16 @@ if [ "$HOST_INIT" = "systemd" ]; then
 fi
 echo "Init: $HOST_INIT | DM: ${HOST_DM:-none}"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
+ensure_tools fuser pkill systemctl modprobe swapon mkswap setterm xset 2>/dev/null || true
+
 # Aggressively kill all desktop environments and GUI processes
 for proc in kded5 soliduiserver udisksd kwin_x11 kwin_wayland plasmashell gnome-shell cinnamon-session xfce4-session mate-session lxsession openbox fluxbox i3 sway hyprland waybar polybar picom compton dunst mako notification-daemon; do
     pkill -9 -f "$proc" 2>/dev/null || true
 done
 
-# Stop all display managers
+# Stop all display managers and unnecessary services
 for dm in gdm sddm lightdm lxdm xdm; do
     systemctl stop "$dm" 2>/dev/null || true
     systemctl stop "$dm.service" 2>/dev/null || true
@@ -25,11 +29,15 @@ systemctl stop bluetooth 2>/dev/null || true
 systemctl stop cups 2>/dev/null || true
 systemctl stop avahi-daemon 2>/dev/null || true
 
-# Kill all processes on other TTYs aggressively
-CURRENT_TTY=$(fgconsole 2>/dev/null || echo "1")
-for tty in 1 2 3 4 5 6 7 8 9 10 11 12; do
-    [ "$tty" -ne "$CURRENT_TTY" ] && fuser -k -9 /dev/tty${tty} >/dev/null 2>&1 || true
-done
+# Kill all processes on other TTYs - only if we can determine current TTY
+CURRENT_TTY=$(fgconsole 2>/dev/null || true)
+if [ -z "$CURRENT_TTY" ]; then
+    echo "Could not determine current TTY. Skipping TTY cleanup for safety."
+else
+    for tty in 1 2 3 4 5 6 7 8 9 10 11 12; do
+        [ "$tty" -ne "$CURRENT_TTY" ] && fuser -k -9 /dev/tty${tty} >/dev/null 2>&1 || true
+    done
+fi
 
 # Kill any process holding block devices
 for dev in /dev/sd* /dev/nvme* /dev/hd*; do
@@ -38,7 +46,6 @@ done
 
 # Lock the session - prevent new logins
 echo "1" > /proc/sys/kernel/sysrq 2>/dev/null || true
-# Disable magic sysrq reboot
 echo "0" > /proc/sys/kernel/sysrq 2>/dev/null || true
 
 # USB power management - aggressive
@@ -49,6 +56,19 @@ for i in /sys/bus/usb/devices/*/power/autosuspend; do
     [ -f "$i" ] && echo -1 > "$i" 2>/dev/null || true
 done
 echo -1 > /sys/module/usbcore/parameters/autosuspend 2>/dev/null || true
+
+# Keep-awake lock: prevent sleep, suspend, hibernate, screen blanking
+if [ -f "$SCRIPT_DIR/blacklogic-keep-awake.sh" ]; then
+    bash "$SCRIPT_DIR/blacklogic-keep-awake.sh" 2>/dev/null || true
+else
+    # Inline keep-awake fallback
+    systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
+    systemctl stop sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
+    setterm -blank 0 2>/dev/null || true
+    setterm -powersave off 2>/dev/null || true
+    xset s off 2>/dev/null || true
+    xset -dpms 2>/dev/null || true
+fi
 
 # ZRAM setup
 modprobe zram 2>/dev/null || true
