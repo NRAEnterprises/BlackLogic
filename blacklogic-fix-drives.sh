@@ -1,5 +1,8 @@
 #!/bin/bash
 set -Eeuo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
+ensure_tools wipefs parted pvcreate vgcreate vgextend lvcreate lvs vgs pvs fuser blockdev 2>/dev/null || true
 
 VG_NAME="black_vg"
 POOL_NAME="black_pool"

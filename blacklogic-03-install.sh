@@ -116,6 +116,7 @@ fi
 
 if [ -f /usr/local/bin/blacklogic-pool-agent.sh ]; then
     cp /usr/local/bin/blacklogic-pool-agent.sh "$MOUNT_DIR/usr/local/bin/blacklogic-pool-agent.sh" 2>/dev/null || true
+    cp /usr/local/bin/blacklogic-ensure-tools.sh "$MOUNT_DIR/usr/local/bin/blacklogic-ensure-tools.sh" 2>/dev/null || true
     chmod +x "$MOUNT_DIR/usr/local/bin/blacklogic-pool-agent.sh" 2>/dev/null || true
     arch-chroot "$MOUNT_DIR" /bin/bash -c '
         cat > /etc/systemd/system/blacklogic-pool-agent.service <<EOF
