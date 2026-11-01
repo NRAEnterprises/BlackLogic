@@ -57,6 +57,19 @@ for i in /sys/bus/usb/devices/*/power/autosuspend; do
 done
 echo -1 > /sys/module/usbcore/parameters/autosuspend 2>/dev/null || true
 
+# Keep-awake lock: prevent sleep, suspend, hibernate, screen blanking
+if [ -f "$SCRIPT_DIR/blacklogic-keep-awake.sh" ]; then
+    bash "$SCRIPT_DIR/blacklogic-keep-awake.sh" 2>/dev/null || true
+else
+    # Inline keep-awake fallback
+    systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
+    systemctl stop sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
+    setterm -blank 0 2>/dev/null || true
+    setterm -powersave off 2>/dev/null || true
+    xset s off 2>/dev/null || true
+    xset -dpms 2>/dev/null || true
+fi
+
 # ZRAM setup
 modprobe zram 2>/dev/null || true
 if [ -e /dev/zram0 ] && ! swapon --show 2>/dev/null | grep -q "/dev/zram0"; then

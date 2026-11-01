@@ -10,6 +10,8 @@ log "========================================"
 log "      BLACKLOGIC ORCHESTRATOR"
 log "      $(date)"
 log "========================================"
+log ">>> Keep-Awake Lock"
+"$SCRIPT_DIR/blacklogic-keep-awake.sh" 2>&1 | tee -a "$LOG_FILE" || true
 log ">>> Stage 1: Environment"
 "$SCRIPT_DIR/blacklogic-01-env.sh" 2>&1 | tee -a "$LOG_FILE" || { log "FATAL: Env."; exit 1; }
 log ">>> Stage 2: Format"
