@@ -2,7 +2,7 @@
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
-ensure_tools lvs vgs lvextend pvcreate parted btrfs 2>/dev/null || true
+ensure_tools lvs vgs lvextend pvcreate parted btrfs jq blockdev udevadm mount umount 2>/dev/null || true
 
 VG_NAME="black_vg"
 POOL_NAME="black_pool"
