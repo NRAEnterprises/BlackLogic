@@ -1,13 +1,17 @@
 #!/bin/bash
 set -uo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR=""
+for _src in "${ZSH_SOURCE:-}" "${BASH_SOURCE:-}" "${KSH_SOURCE:-}" "$0"; do
+    [ -n "$_src" ] && [ -f "$_src" ] && { SCRIPT_DIR="$(cd "$(dirname "$_src")" && pwd)"; break; }
+done
+[ -z "$SCRIPT_DIR" ] && SCRIPT_DIR="$(pwd)"
 [ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
 require_root
 ensure_tools lvs vgs lvextend pvcreate parted btrfs jq blockdev udevadm mount umount 2>/dev/null || true
 
-VG_NAME="black_vg"
+VG_NAME="black_pool"
 POOL_NAME="black_pool"
-POOL_VOL_NAME="root"
+POOL_VOL_NAME="blacklogic"
 MOUNT_DIR="/mnt/blackarch"
 STATE_FILE="/tmp/blacklogic-state"
 LOG_FILE="/var/log/blacklogic-pool-agent.log"

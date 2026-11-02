@@ -1,12 +1,16 @@
 #!/bin/bash
 set -Eeuo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR=""
+for _src in "${ZSH_SOURCE:-}" "${BASH_SOURCE:-}" "${KSH_SOURCE:-}" "$0"; do
+    [ -n "$_src" ] && [ -f "$_src" ] && { SCRIPT_DIR="$(cd "$(dirname "$_src")" && pwd)"; break; }
+done
+[ -z "$SCRIPT_DIR" ] && SCRIPT_DIR="$(pwd)"
 [ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
 require_root
 ensure_tools parted wipefs pvcreate vgcreate vgextend lvcreate lvextend mkfs.fat mkfs.btrfs partprobe blkid lsblk jq blockdev udevadm smartctl mdadm fuser pkill systemctl modprobe swapon mkswap lvs vgs pvs mount umount findmnt wget tar zstd 2>/dev/null || true
 ensure_tools parted wipefs pvcreate vgcreate vgextend lvcreate lvextend mkfs.fat mkfs.btrfs partprobe blkid lsblk jq blockdev udevadm smartctl mdadm fuser pkill systemctl modprobe swapon mkswap lvs vgs pvs mount umount findmnt wget tar zstd 2>/dev/null || true
 
-VG_NAME="black_vg"
+VG_NAME="black_pool"
 POOL_NAME="black_pool"
 NEW_SIZE="15.00PiB"
 CHUNK_SIZE="1G"
@@ -211,26 +215,26 @@ for D in "${DRIVES[@]}"; do
     [[ "$DEV" == *nvme* ]] && PS="p"
 
     if [ "$CLASS" -eq 10 ]; then
-        parted -s "$DEV" unit MiB mkpart black-pool 1MiB "${STARTING_POOL_GIB}MiB" >/dev/null 2>&1 || { echo "Failed creating pool partition on $DEV"; continue; }
+        parted -s "$DEV" unit MiB mkpart black_pool 1MiB "${STARTING_POOL_GIB}MiB" >/dev/null 2>&1 || { echo "Failed creating pool partition on $DEV"; continue; }
         LVM_PART="${DEV}${PS}1"
     else
-        parted -s "$DEV" unit MiB mkpart black-boot 1MiB 1025MiB >/dev/null 2>&1 || { echo "Failed creating boot partition on $DEV"; continue; }
-        parted -s "$DEV" unit MiB mkpart black-efi 1025MiB 1537MiB >/dev/null 2>&1 || { echo "Failed creating EFI partition on $DEV"; continue; }
+        parted -s "$DEV" unit MiB mkpart black_boot 1MiB 1025MiB >/dev/null 2>&1 || { echo "Failed creating boot partition on $DEV"; continue; }
+        parted -s "$DEV" unit MiB mkpart black_EFI 1025MiB 1537MiB >/dev/null 2>&1 || { echo "Failed creating EFI partition on $DEV"; continue; }
         parted -s "$DEV" set 2 esp on 2>/dev/null || true
-        parted -s "$DEV" unit MiB mkpart black-surgery 1537MiB 5121MiB >/dev/null 2>&1 || { echo "Failed creating surgery partition on $DEV"; continue; }
+        parted -s "$DEV" unit MiB mkpart black_surgery 1537MiB 5121MiB >/dev/null 2>&1 || { echo "Failed creating surgery partition on $DEV"; continue; }
         HAS_SWAP=$(lsblk -n -o LABEL "$DEV" 2>/dev/null | grep -c "BLACK-SWAP" || true)
         if [ "$CLASS" -eq 100 ] && [ "$HAS_SWAP" -eq 0 ]; then
-            parted -s "$DEV" unit MiB mkpart black-swap 5121MiB 13313MiB >/dev/null 2>&1 || { echo "Failed creating swap partition on $DEV"; continue; }
-            mkswap -L "BLACK-SWAP" "${DEV}${PS}4" >/dev/null 2>&1 || true
-            parted -s "$DEV" unit MiB mkpart black-pool 13313MiB "$((13313 + STARTING_POOL_GIB * 1024))MiB" >/dev/null 2>&1 || { echo "Failed creating pool partition on $DEV"; continue; }
+            parted -s "$DEV" unit MiB mkpart black_swap 5121MiB 13313MiB >/dev/null 2>&1 || { echo "Failed creating swap partition on $DEV"; continue; }
+            mkswap -L "black_swap" "${DEV}${PS}4" >/dev/null 2>&1 || true
+            parted -s "$DEV" unit MiB mkpart black_pool 13313MiB "$((13313 + STARTING_POOL_GIB * 1024))MiB" >/dev/null 2>&1 || { echo "Failed creating pool partition on $DEV"; continue; }
             LVM_PART="${DEV}${PS}5"
         else
-            parted -s "$DEV" unit MiB mkpart black-pool 5121MiB "$((5121 + STARTING_POOL_GIB * 1024))MiB" >/dev/null 2>&1 || { echo "Failed creating pool partition on $DEV"; continue; }
+            parted -s "$DEV" unit MiB mkpart black_pool 5121MiB "$((5121 + STARTING_POOL_GIB * 1024))MiB" >/dev/null 2>&1 || { echo "Failed creating pool partition on $DEV"; continue; }
             LVM_PART="${DEV}${PS}4"
         fi
-        mkfs.btrfs -L black-boot -f "${DEV}${PS}1" >/dev/null 2>&1 || true
+        mkfs.btrfs -L black_boot -f "${DEV}${PS}1" >/dev/null 2>&1 || true
         mkfs.fat -F32 -n "BLACK-EFI" "${DEV}${PS}2" >/dev/null 2>&1 || true
-        mkfs.btrfs -L black-surgery -f "${DEV}${PS}3" >/dev/null 2>&1 || true
+        pvcreate -ff -y "${DEV}${PS}3" 2>/dev/null && { if vgs black_surgery &>/dev/null; then vgextend black_surgery "${DEV}${PS}3" 2>/dev/null || true; else vgcreate black_surgery "${DEV}${PS}3" 2>/dev/null || true; fi; } || true
     fi
 
     if ! wait_for_partition "$LVM_PART" "$MAX_PART_WAIT"; then
@@ -251,6 +255,13 @@ for D in "${DRIVES[@]}"; do
     fi
     [ "$pv_ok" -eq 0 ] && { echo "pvcreate failed on $LVM_PART"; continue; }
 
+    # Label PV as black_driveN (lowest unassigned number starting at 0)
+    DRIVE_NUM=0
+    while pvs --noheadings -o pv_tags 2>/dev/null | tr ',' '\n' | grep -qx "black_drive${DRIVE_NUM}"; do
+        DRIVE_NUM=$((DRIVE_NUM + 1))
+    done
+    pvchange --addtag "black_drive${DRIVE_NUM}" "$LVM_PART" 2>/dev/null || true
+
     pvresize "$LVM_PART" 2>/dev/null || true
 
     if vgs "$VG_NAME" &>/dev/null; then
@@ -266,14 +277,21 @@ for D in "${DRIVES[@]}"; do
     fi
 
     NEXT=$(lvs --noheadings -o lv_name "$VG_NAME" 2>/dev/null | grep -c "black_drive" || true)
-    if ! lvcreate -V "$NEW_SIZE" --thinpool "$POOL_NAME" -n "black_drive$NEXT" "$VG_NAME" 2>/dev/null; then
-        echo "lvcreate root LV failed on $DEV"
-        continue
+    if ! lvs "$VG_NAME/blacklogic" &>/dev/null; then
+        if ! lvcreate -V "$NEW_SIZE" --thinpool "$POOL_NAME" -n "blacklogic" "$VG_NAME" 2>/dev/null; then
+            echo "lvcreate root LV failed on $DEV"
+            continue
+        fi
     fi
 
-    mkfs.btrfs -f "/dev/$VG_NAME/black_drive$NEXT" >/dev/null 2>&1 || true
+    mkfs.btrfs -f "/dev/$VG_NAME/blacklogic" >/dev/null 2>&1 || true
+    # Create blacksurgery LV in black_surgery VG
+    if vgs black_surgery &>/dev/null && ! lvs black_surgery/blacksurgery &>/dev/null; then
+        lvcreate -L 4G -n blacksurgery black_surgery 2>/dev/null || true
+        mkfs.btrfs -f "/dev/black_surgery/blacksurgery" >/dev/null 2>&1 || true
+    fi
     record_drive_done "$DEV"
-    echo "  $DEV -> black_drive$NEXT (pool partition: ${STARTING_POOL_GIB}GiB starting allocation)"
+    echo "  $DEV -> blacklogic (pool partition: ${STARTING_POOL_GIB}GiB starting allocation)"
     SUCCESS=1
 done
 
