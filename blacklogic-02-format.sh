@@ -281,7 +281,8 @@ for D in "${DRIVES[@]}"; do
 
     # Label PV as black_driveN (lowest unassigned number starting at 0)
     DRIVE_NUM=0
-    while pvs --noheadings -o pv_tags 2>/dev/null | tr ',' '\n' | grep -qx "black_drive${DRIVE_NUM}"; do
+    while pvs --noheadings -o pv_tags 2>/dev/null | tr ',' '
+' | grep -qx "black_drive${DRIVE_NUM}"; do
         DRIVE_NUM=$((DRIVE_NUM + 1))
     done
     pvchange --addtag "black_drive${DRIVE_NUM}" "$LVM_PART" 2>/dev/null || true
@@ -297,7 +298,7 @@ for D in "${DRIVES[@]}"; do
     sleep 1
 
     if ! lvs "$VG_NAME/$POOL_NAME" &>/dev/null; then
-        lvcreate --type thin-pool -l 10%VG -c "$CHUNK_SIZE" -n "$POOL_NAME" "$VG_NAME" 2>/dev/null || { echo "lvcreate thin-pool failed"; continue; }
+        lvcreate --type thin-pool -l 50%VG -c "$CHUNK_SIZE" -n "$POOL_NAME" "$VG_NAME" 2>/dev/null || { echo "lvcreate thin-pool failed"; continue; }
     fi
 
     NEXT=$(lvs --noheadings -o lv_name "$VG_NAME" 2>/dev/null | grep -c "black_drive" || true)
@@ -309,6 +310,8 @@ for D in "${DRIVES[@]}"; do
     fi
 
     mkfs.btrfs -f "/dev/$VG_NAME/blacklogic" >/dev/null 2>&1 || true
+    mkdir -p /tmp/blacklogic-mnt 2>/dev/null || true
+    mount "/dev/$VG_NAME/blacklogic" /tmp/blacklogic-mnt 2>/dev/null && { btrfs subvolume create /tmp/blacklogic-mnt/@ 2>/dev/null || true; umount /tmp/blacklogic-mnt 2>/dev/null || true; }
     # Create blacksurgery LV in black_surgery VG
     if vgs black_surgery &>/dev/null && ! lvs black_surgery/blacksurgery &>/dev/null; then
         lvcreate -L 4G -n blacksurgery black_surgery 2>/dev/null || true

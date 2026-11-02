@@ -39,6 +39,9 @@ if ! flock -n 9; then
     exit 0
 fi
 
+vgchange -ay "$VG_NAME" 2>/dev/null || true
+udevadm settle 2>/dev/null || true
+sleep 1
 [ -b "/dev/$VG_NAME/$POOL_NAME" ] || { log "Thin pool not found, nothing to manage."; exit 0; }
 
 [ -z "${PRIMARY_DEV:-}" ] && PRIMARY_DEV=$(pvs --noheadings -o pv_name -S "vg_name=$VG_NAME" 2>/dev/null | head -n1 | tr -d ' ')
