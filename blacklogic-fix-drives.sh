@@ -55,6 +55,8 @@ for dev in /dev/sd* /dev/nvme* /dev/hd*; do
     mdadm --zero-superblock "$dev" 2>/dev/null || true
     wipefs -a "$dev" 2>/dev/null || true
     dd if=/dev/zero of="$dev" bs=1M count=10 conv=fsync 2>/dev/null || true
+    partprobe "$dev" 2>/dev/null || true
+    blockdev --rereadpt "$dev" 2>/dev/null || true
 done
 
 # Clean LVM cache
