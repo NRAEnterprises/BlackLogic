@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
+require_root
 ensure_tools ping systemctl dhclient dhcpcd reflector 2>/dev/null || true
 
 [ -f /tmp/blacklogic-state ] && . /tmp/blacklogic-state

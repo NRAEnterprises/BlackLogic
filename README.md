@@ -112,6 +112,8 @@ Because the scripts write and modify partition tables, LVM metadata, and boot co
 - **Tool auto-install**: All scripts source `blacklogic-ensure-tools.sh` which automatically installs missing dependencies via network (pacman/apt/dnf/yum) with USB device fallback.
 - **Aggressive environment lockdown**: Stage 1 kills desktop environments, display managers, and locks the session for uninterrupted installation.
 - **Location-independent**: The orchestrator resolves sibling scripts relative to its own path.
+- **Keep-awake lock**: `blacklogic-keep-awake.sh` disables sleep, suspend, hibernate, screen blanking, and auto-dim for the duration of the process.
+- **Root enforcement**: All scripts verify root privileges at startup and fail immediately with a clear message if not run as root.
 
 ## Prerequisites
 

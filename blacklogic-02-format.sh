@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
+require_root
 ensure_tools parted wipefs pvcreate vgcreate vgextend lvcreate lvextend mkfs.fat mkfs.btrfs partprobe blkid lsblk jq blockdev udevadm smartctl mdadm fuser pkill systemctl modprobe swapon mkswap lvs vgs pvs mount umount findmnt wget tar zstd 2>/dev/null || true
 ensure_tools parted wipefs pvcreate vgcreate vgextend lvcreate lvextend mkfs.fat mkfs.btrfs partprobe blkid lsblk jq blockdev udevadm smartctl mdadm fuser pkill systemctl modprobe swapon mkswap lvs vgs pvs mount umount findmnt wget tar zstd 2>/dev/null || true
 

@@ -2,6 +2,7 @@
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
+require_root
 ensure_tools lvs mount umount arch-chroot 2>/dev/null || true
 MOUNT_DIR="/mnt/blackarch"; VG_NAME="black_vg"; POOL_NAME="black_pool"
 log() { echo "[$(date +%H:%M:%S)] $*"; }
