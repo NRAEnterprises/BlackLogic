@@ -204,6 +204,18 @@ for D in "${DRIVES[@]}"; do
         if vgs "$vg" &>/dev/null; then
             for pv in $(pvs --noheadings -o pv_name -S "vg_name=$vg" 2>/dev/null); do
                 [ -z "$pv" ] && continue
+                if [[ "$pv" == "$DEV"* ]]; then
+                    vgchange -an "$vg" 2>/dev/null || true
+                    vgremove -f "$vg" 2>/dev/null || true
+                fi
+            done
+        fi
+    done
+    for p in $(lsblk -n -o NAME "$DEV" 2>/dev/null); do dmsetup remove "/dev/$p" 2>/dev/null || true; done
+    for vg in black_pool black_surgery surgery_vg; do
+        if vgs "$vg" &>/dev/null; then
+            for pv in $(pvs --noheadings -o pv_name -S "vg_name=$vg" 2>/dev/null); do
+                [ -z "$pv" ] && continue
                 [[ "$pv" == "$DEV"* ]] && { vgchange -an "$vg" 2>/dev/null || true; vgremove -f "$vg" 2>/dev/null || true; break; }
             done
         fi

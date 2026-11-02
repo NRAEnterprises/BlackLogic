@@ -7,7 +7,7 @@ done
 [ -z "$SCRIPT_DIR" ] && SCRIPT_DIR="$(pwd)"
 [ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
 require_root
-ensure_tools wipefs parted fuser blockdev pvcreate vgcreate vgextend lvcreate lvs vgs pvs pvremove 2>/dev/null || true
+ensure_tools wipefs parted fuser blockdev pvcreate vgcreate vgextend lvcreate lvs vgs pvs pvremove dmsetup partprobe 2>/dev/null || true
 
 VG_NAME="black_pool"
 echo "=== FIXER: Drives ==="
@@ -18,18 +18,15 @@ for dev in /dev/sd* /dev/nvme* /dev/hd*; do
 done
 sleep 1
 
-# Deactivate all relevant VGs if active
+# Deactivate and remove ALL relevant VGs
 for vg in "$VG_NAME" black_surgery surgery_vg; do
     if vgs "$vg" &>/dev/null; then
         vgchange -an "$vg" 2>/dev/null || true
         sleep 1
-        if vgs "$vg" &>/dev/null; then
-            ROOT_LV=$(lvs --noheadings -o lv_name "$vg" 2>/dev/null | grep -v "black_pool" | grep -v "\[" | head -n1 | tr -d ' ' || true)
-            if [ -z "$ROOT_LV" ] || [ ! -b "/dev/$vg/$ROOT_LV" ]; then
-                echo "No valid root LV in $vg. Purging VG metadata."
-                vgremove -f "$vg" 2>/dev/null || true
-            fi
-        fi
+        vgremove -f "$vg" 2>/dev/null || true
+        for dm in $(dmsetup ls 2>/dev/null | grep -i "$vg" | cut -f1); do
+            [ -n "$dm" ] && dmsetup remove "$dm" 2>/dev/null || true
+        done
     fi
 done
 sleep 1
@@ -48,6 +45,9 @@ for dev in /dev/sd* /dev/nvme* /dev/hd*; do
     [[ "$DEV_NAME" == "$LIVE_DRIVE" ]] && continue
     lsblk -n -o MOUNTPOINT "$dev" 2>/dev/null | grep -q "/" && continue
     echo "Clearing signatures on $dev..."
+    for p in $(lsblk -n -o NAME "$dev" 2>/dev/null); do
+        [ -n "$p" ] && dmsetup remove "/dev/$p" 2>/dev/null || true
+    done
     pvremove -ff -y "$dev" 2>/dev/null || true
     for p in $(lsblk -n -o NAME "$dev" 2>/dev/null); do
         [ -n "$p" ] && pvremove -ff -y "/dev/$p" 2>/dev/null || true
