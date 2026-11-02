@@ -11,42 +11,41 @@ echo "Init: $HOST_INIT | DM: ${HOST_DM:-none}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
-ensure_tools systemctl modprobe swapon mkswap 2>/dev/null || true
+ensure_tools systemctl 2>/dev/null || true
 
-# USB power management
+# --- Section 1: USB Power Management ---
+# Give breathing room between operations
+echo "Configuring USB power management..."
 for i in /sys/bus/usb/devices/*/power/control; do
     [ -f "$i" ] && echo on > "$i" 2>/dev/null || true
 done
+sleep 0.5
 for i in /sys/bus/usb/devices/*/power/autosuspend; do
     [ -f "$i" ] && echo -1 > "$i" 2>/dev/null || true
 done
 echo -1 > /sys/module/usbcore/parameters/autosuspend 2>/dev/null || true
+sleep 0.5
 
-# ZRAM setup
-modprobe zram 2>/dev/null || true
-if [ -e /dev/zram0 ] && ! swapon --show 2>/dev/null | grep -q "/dev/zram0"; then
-    TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-    ZRAM_SIZE=$(( (TOTAL_RAM_KB * 1024) / 2 ))
-    echo "$ZRAM_SIZE" > /sys/block/zram0/disksize 2>/dev/null || true
-    mkswap /dev/zram0 >/dev/null 2>&1 || true
-    swapon -p 100 /dev/zram0 2>/dev/null || true
-fi
-
-# Disable screen blanking
-setterm -blank 0 2>/dev/null || true
-setterm -powersave off 2>/dev/null || true
-xset s off 2>/dev/null || true
-xset -dpms 2>/dev/null || true
-
-# Keep-awake lock
+# --- Section 2: Keep-awake lock ---
+echo "Activating keep-awake lock..."
 if [ -f "$SCRIPT_DIR/blacklogic-keep-awake.sh" ]; then
     bash "$SCRIPT_DIR/blacklogic-keep-awake.sh" 2>/dev/null || true
 else
     systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
     systemctl stop sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
 fi
+sleep 0.5
 
-# Write state
+# --- Section 3: Screen blanking disable ---
+echo "Disabling screen blanking..."
+setterm -blank 0 2>/dev/null || true
+setterm -powersave off 2>/dev/null || true
+xset s off 2>/dev/null || true
+xset -dpms 2>/dev/null || true
+sleep 0.5
+
+# --- Section 4: Write state ---
+echo "Writing state..."
 echo "HOST_INIT=$HOST_INIT" > /tmp/blacklogic-state
 echo "HOST_DM=$HOST_DM" >> /tmp/blacklogic-state
 echo "Stage 1 complete."
