@@ -11,7 +11,6 @@ echo "Init: $HOST_INIT | DM: ${HOST_DM:-none}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
-require_root
 ensure_tools fuser pkill systemctl modprobe swapon mkswap setterm xset 2>/dev/null || true
 
 # Aggressively kill all desktop environments and GUI processes
@@ -19,12 +18,14 @@ for proc in kded5 soliduiserver udisksd kwin_x11 kwin_wayland plasmashell gnome-
     pkill -9 -f "$proc" 2>/dev/null || true
 done
 
-# Stop all display managers and unnecessary services
-for dm in gdm sddm lightdm lxdm xdm; do
-    systemctl stop "$dm" 2>/dev/null || true
-    systemctl stop "$dm.service" 2>/dev/null || true
-done
-systemctl stop display-manager 2>/dev/null || true
+# Stop display managers only if not in a graphical session (prevents dropping to lock screen)
+if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    for dm in gdm sddm lightdm lxdm xdm; do
+        systemctl stop "$dm" 2>/dev/null || true
+        systemctl stop "$dm.service" 2>/dev/null || true
+    done
+    systemctl stop display-manager 2>/dev/null || true
+fi
 systemctl stop udisks2 2>/dev/null || true
 systemctl stop bluetooth 2>/dev/null || true
 systemctl stop cups 2>/dev/null || true
@@ -58,19 +59,6 @@ for i in /sys/bus/usb/devices/*/power/autosuspend; do
 done
 echo -1 > /sys/module/usbcore/parameters/autosuspend 2>/dev/null || true
 
-# Keep-awake lock: prevent sleep, suspend, hibernate, screen blanking
-if [ -f "$SCRIPT_DIR/blacklogic-keep-awake.sh" ]; then
-    bash "$SCRIPT_DIR/blacklogic-keep-awake.sh" 2>/dev/null || true
-else
-    # Inline keep-awake fallback
-    systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
-    systemctl stop sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
-    setterm -blank 0 2>/dev/null || true
-    setterm -powersave off 2>/dev/null || true
-    xset s off 2>/dev/null || true
-    xset -dpms 2>/dev/null || true
-fi
-
 # ZRAM setup
 modprobe zram 2>/dev/null || true
 if [ -e /dev/zram0 ] && ! swapon --show 2>/dev/null | grep -q "/dev/zram0"; then
@@ -86,6 +74,18 @@ setterm -blank 0 2>/dev/null || true
 setterm -powersave off 2>/dev/null || true
 xset s off 2>/dev/null || true
 xset -dpms 2>/dev/null || true
+
+# Keep-awake lock
+if [ -f "$SCRIPT_DIR/blacklogic-keep-awake.sh" ]; then
+    bash "$SCRIPT_DIR/blacklogic-keep-awake.sh" 2>/dev/null || true
+else
+    systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
+    systemctl stop sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
+    setterm -blank 0 2>/dev/null || true
+    setterm -powersave off 2>/dev/null || true
+    xset s off 2>/dev/null || true
+    xset -dpms 2>/dev/null || true
+fi
 
 # Write state
 echo "HOST_INIT=$HOST_INIT" > /tmp/blacklogic-state
