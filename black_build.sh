@@ -48,22 +48,22 @@ mkfs.btrfs -f "${DRIVE1}4"
 echo "=== 3. Setting up LVM ==="
 pvcreate -f "${DRIVE1}4" "${DRIVE1}5" "${DRIVE2}1"
 vgcreate surgery_vg "${DRIVE1}4"
-vgcreate black_vg "${DRIVE1}5" "${DRIVE2}1"
+vgcreate black_pool "${DRIVE1}5" "${DRIVE2}1"
 
 lvcreate -l 100%FREE -n surgery_root surgery_vg
 mkfs.btrfs -f /dev/surgery_vg/surgery_root
 
 # Main Pool (10% of VG, max chunk size)
-lvcreate --type thin-pool -l 10%VG -c "$CHUNK_SIZE" -n black_pool black_vg
-lvcreate -V "$NEW_SIZE" --thinpool black_pool -n root black_vg
+lvcreate --type thin-pool -l 10%VG -c "$CHUNK_SIZE" -n black_pool black_pool
+lvcreate -V "$NEW_SIZE" --thinpool black_pool -n blacklogic black_pool
 
 echo "=== 4. Formatting and Mounting BlackArch Root ==="
-mkfs.btrfs -f /dev/black_vg/root
-mount /dev/black_vg/root "$MOUNT_DIR"
+mkfs.btrfs -f /dev/black_pool/blacklogic
+mount /dev/black_pool/blacklogic "$MOUNT_DIR"
 btrfs subvolume create "${MOUNT_DIR}/@"
 umount "$MOUNT_DIR"
 
-mount -o compress=zstd:3,subvol=@,noatime,discard=async,space_cache=v2 /dev/black_vg/root "$MOUNT_DIR"
+mount -o compress=zstd:3,subvol=@,noatime,discard=async,space_cache=v2 /dev/black_pool/blacklogic "$MOUNT_DIR"
 mkdir -p "${MOUNT_DIR}/boot" "${MOUNT_DIR}/boot/efi"
 mount "${DRIVE1}2" "${MOUNT_DIR}/boot"
 mount "${DRIVE1}1" "${MOUNT_DIR}/boot/efi"

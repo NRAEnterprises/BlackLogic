@@ -9,9 +9,9 @@ done
 require_root
 ensure_tools grub mkfs.fat mkfs.btrfs parted btrfs arch-chroot pacman mkinitcpio locale-gen efibootmgr grub-install grub-mkconfig wget tar zstd mount umount 2>/dev/null || true
 
-VG_NAME="black_vg"
+VG_NAME="black_pool"
 POOL_NAME="black_pool"
-POOL_VOL_NAME="root"
+POOL_VOL_NAME="blacklogic"
 MOUNT_DIR="/mnt/blackarch"
 LOG_FILE="/var/log/blacklogic-install.log"
 STATE_FILE="/tmp/blacklogic-state"

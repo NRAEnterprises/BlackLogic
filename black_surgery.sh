@@ -5,7 +5,7 @@ set -Eeuo pipefail
 vgchange -ay
 
 # --- Variables ---
-MAIN_ROOT="/dev/black_vg/root"
+MAIN_ROOT="/dev/black_pool/blacklogic"
 EFI_PART="/dev/sdb1"
 BOOT_PART="/dev/sdb2"
 MOUNT_DIR="/mnt/blackarch"
