@@ -10,7 +10,7 @@ require_root
 ensure_tools parted wipefs pvcreate vgcreate vgextend lvcreate lvextend mkfs.fat mkfs.btrfs partprobe blkid lsblk jq blockdev udevadm smartctl mdadm fuser pkill systemctl modprobe swapon mkswap lvs vgs pvs mount umount findmnt wget tar zstd 2>/dev/null || true
 ensure_tools parted wipefs pvcreate vgcreate vgextend lvcreate lvextend mkfs.fat mkfs.btrfs partprobe blkid lsblk jq blockdev udevadm smartctl mdadm fuser pkill systemctl modprobe swapon mkswap lvs vgs pvs mount umount findmnt wget tar zstd 2>/dev/null || true
 
-VG_NAME="black_vg"
+VG_NAME="black_pool"
 POOL_NAME="black_pool"
 NEW_SIZE="15.00PiB"
 CHUNK_SIZE="1G"

@@ -46,9 +46,11 @@ mkdir -p "$MOUNT_DIR"
 mountpoint -q "$MOUNT_DIR" || mount -o subvol=@,compress=zstd:3,noatime,discard=async,space_cache=v2 "$ROOT_PATH" "$MOUNT_DIR" || mount "$ROOT_PATH" "$MOUNT_DIR" || { echo "Root mount failed."; exit 1; }
 
 if [ ! -f "$MOUNT_DIR/etc/os-release" ]; then
-    log "Bootstrapping Arch..."
-    wget -q -O /tmp/bootstrap.tar.zst https://geo.mirror.pkgbuild.com/iso/latest/archlinux-bootstrap-x86_64.tar.zst || { echo "Download failed."; exit 1; }
-    tar -I zstd -xpf /tmp/bootstrap.tar.zst -C "$MOUNT_DIR" --strip-components=1 || { echo "Extract failed."; exit 1; }
+    log "Bootstrapping BlackArch..."
+    wget -q -O /tmp/strap.sh https://blackarch.org/strap.sh || { echo "Download failed."; exit 1; }
+    chmod +x /tmp/strap.sh
+    cp /tmp/strap.sh "$MOUNT_DIR/tmp/strap.sh" 2>/dev/null || true
+    /tmp/strap.sh || { echo "BlackArch strap failed."; exit 1; }
     cp /etc/resolv.conf "$MOUNT_DIR/etc/resolv.conf" 2>/dev/null || true
 fi
 
