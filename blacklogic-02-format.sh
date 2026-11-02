@@ -215,26 +215,26 @@ for D in "${DRIVES[@]}"; do
     [[ "$DEV" == *nvme* ]] && PS="p"
 
     if [ "$CLASS" -eq 10 ]; then
-        parted -s "$DEV" unit MiB mkpart black-pool 1MiB "${STARTING_POOL_GIB}MiB" >/dev/null 2>&1 || { echo "Failed creating pool partition on $DEV"; continue; }
+        parted -s "$DEV" unit MiB mkpart black_pool 1MiB "${STARTING_POOL_GIB}MiB" >/dev/null 2>&1 || { echo "Failed creating pool partition on $DEV"; continue; }
         LVM_PART="${DEV}${PS}1"
     else
-        parted -s "$DEV" unit MiB mkpart black-boot 1MiB 1025MiB >/dev/null 2>&1 || { echo "Failed creating boot partition on $DEV"; continue; }
-        parted -s "$DEV" unit MiB mkpart black-efi 1025MiB 1537MiB >/dev/null 2>&1 || { echo "Failed creating EFI partition on $DEV"; continue; }
+        parted -s "$DEV" unit MiB mkpart black_boot 1MiB 1025MiB >/dev/null 2>&1 || { echo "Failed creating boot partition on $DEV"; continue; }
+        parted -s "$DEV" unit MiB mkpart black_EFI 1025MiB 1537MiB >/dev/null 2>&1 || { echo "Failed creating EFI partition on $DEV"; continue; }
         parted -s "$DEV" set 2 esp on 2>/dev/null || true
-        parted -s "$DEV" unit MiB mkpart black-surgery 1537MiB 5121MiB >/dev/null 2>&1 || { echo "Failed creating surgery partition on $DEV"; continue; }
+        parted -s "$DEV" unit MiB mkpart black_surgery 1537MiB 5121MiB >/dev/null 2>&1 || { echo "Failed creating surgery partition on $DEV"; continue; }
         HAS_SWAP=$(lsblk -n -o LABEL "$DEV" 2>/dev/null | grep -c "BLACK-SWAP" || true)
         if [ "$CLASS" -eq 100 ] && [ "$HAS_SWAP" -eq 0 ]; then
-            parted -s "$DEV" unit MiB mkpart black-swap 5121MiB 13313MiB >/dev/null 2>&1 || { echo "Failed creating swap partition on $DEV"; continue; }
-            mkswap -L "BLACK-SWAP" "${DEV}${PS}4" >/dev/null 2>&1 || true
-            parted -s "$DEV" unit MiB mkpart black-pool 13313MiB "$((13313 + STARTING_POOL_GIB * 1024))MiB" >/dev/null 2>&1 || { echo "Failed creating pool partition on $DEV"; continue; }
+            parted -s "$DEV" unit MiB mkpart black_swap 5121MiB 13313MiB >/dev/null 2>&1 || { echo "Failed creating swap partition on $DEV"; continue; }
+            mkswap -L "black_swap" "${DEV}${PS}4" >/dev/null 2>&1 || true
+            parted -s "$DEV" unit MiB mkpart black_pool 13313MiB "$((13313 + STARTING_POOL_GIB * 1024))MiB" >/dev/null 2>&1 || { echo "Failed creating pool partition on $DEV"; continue; }
             LVM_PART="${DEV}${PS}5"
         else
-            parted -s "$DEV" unit MiB mkpart black-pool 5121MiB "$((5121 + STARTING_POOL_GIB * 1024))MiB" >/dev/null 2>&1 || { echo "Failed creating pool partition on $DEV"; continue; }
+            parted -s "$DEV" unit MiB mkpart black_pool 5121MiB "$((5121 + STARTING_POOL_GIB * 1024))MiB" >/dev/null 2>&1 || { echo "Failed creating pool partition on $DEV"; continue; }
             LVM_PART="${DEV}${PS}4"
         fi
-        mkfs.btrfs -L black-boot -f "${DEV}${PS}1" >/dev/null 2>&1 || true
+        mkfs.btrfs -L black_boot -f "${DEV}${PS}1" >/dev/null 2>&1 || true
         mkfs.fat -F32 -n "BLACK-EFI" "${DEV}${PS}2" >/dev/null 2>&1 || true
-        mkfs.btrfs -L black-surgery -f "${DEV}${PS}3" >/dev/null 2>&1 || true
+        mkfs.btrfs -L black_surgery -f "${DEV}${PS}3" >/dev/null 2>&1 || true
     fi
 
     if ! wait_for_partition "$LVM_PART" "$MAX_PART_WAIT"; then
@@ -254,6 +254,13 @@ for D in "${DRIVES[@]}"; do
         pvcreate -ff -y "$LVM_PART" 2>/dev/null && pv_ok=1
     fi
     [ "$pv_ok" -eq 0 ] && { echo "pvcreate failed on $LVM_PART"; continue; }
+
+    # Label PV as black_driveN (lowest unassigned number starting at 0)
+    DRIVE_NUM=0
+    while pvs --noheadings -o pv_tags 2>/dev/null | tr ',' '\n' | grep -qx "black_drive${DRIVE_NUM}"; do
+        DRIVE_NUM=$((DRIVE_NUM + 1))
+    done
+    pvchange --addtag "black_drive${DRIVE_NUM}" "$LVM_PART" 2>/dev/null || true
 
     pvresize "$LVM_PART" 2>/dev/null || true
 
