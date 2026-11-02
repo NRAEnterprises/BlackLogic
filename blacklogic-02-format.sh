@@ -11,7 +11,7 @@ ensure_tools parted wipefs pvcreate vgcreate vgextend lvcreate lvextend mkfs.fat
 ensure_tools parted wipefs pvcreate vgcreate vgextend lvcreate lvextend mkfs.fat mkfs.btrfs partprobe blkid lsblk jq blockdev udevadm smartctl mdadm fuser pkill systemctl modprobe swapon mkswap lvs vgs pvs mount umount findmnt wget tar zstd 2>/dev/null || true
 
 VG_NAME="black_pool"
-POOL_NAME="black_pool"
+POOL_NAME="pool"
 NEW_SIZE="15.00PiB"
 CHUNK_SIZE="1G"
 STATE_FILE="/tmp/blacklogic-state"
@@ -270,14 +270,16 @@ for D in "${DRIVES[@]}"; do
     fi
 
     NEXT=$(lvs --noheadings -o lv_name "$VG_NAME" 2>/dev/null | grep -c "black_drive" || true)
-    if ! lvcreate -V "$NEW_SIZE" --thinpool "$POOL_NAME" -n "black_drive$NEXT" "$VG_NAME" 2>/dev/null; then
-        echo "lvcreate root LV failed on $DEV"
-        continue
+    if ! lvs "$VG_NAME/blacklogic" &>/dev/null; then
+        if ! lvcreate -V "$NEW_SIZE" --thinpool "$POOL_NAME" -n "blacklogic" "$VG_NAME" 2>/dev/null; then
+            echo "lvcreate root LV failed on $DEV"
+            continue
+        fi
     fi
 
-    mkfs.btrfs -f "/dev/$VG_NAME/black_drive$NEXT" >/dev/null 2>&1 || true
+    mkfs.btrfs -f "/dev/$VG_NAME/blacklogic" >/dev/null 2>&1 || true
     record_drive_done "$DEV"
-    echo "  $DEV -> black_drive$NEXT (pool partition: ${STARTING_POOL_GIB}GiB starting allocation)"
+    echo "  $DEV -> blacklogic (pool partition: ${STARTING_POOL_GIB}GiB starting allocation)"
     SUCCESS=1
 done
 

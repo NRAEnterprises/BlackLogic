@@ -10,8 +10,8 @@ require_root
 ensure_tools lvs vgs lvextend pvcreate parted btrfs jq blockdev udevadm mount umount 2>/dev/null || true
 
 VG_NAME="black_pool"
-POOL_NAME="black_pool"
-POOL_VOL_NAME="root"
+POOL_NAME="pool"
+POOL_VOL_NAME="blacklogic"
 MOUNT_DIR="/mnt/blackarch"
 STATE_FILE="/tmp/blacklogic-state"
 LOG_FILE="/var/log/blacklogic-pool-agent.log"
