@@ -7,7 +7,7 @@ done
 [ -z "$SCRIPT_DIR" ] && SCRIPT_DIR="$(pwd)"
 [ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
 require_root
-ensure_tools grub mkfs.fat mkfs.btrfs parted btrfs arch-chroot pacman mkinitcpio locale-gen efibootmgr grub-install grub-mkconfig wget tar zstd mount umount 2>/dev/null || true
+ensure_tools mkfs.fat mkfs.btrfs parted btrfs arch-chroot wget tar zstd mount umount 2>/dev/null || true
 
 VG_NAME="black_pool"
 POOL_NAME="black_pool"
@@ -44,7 +44,7 @@ fi
 log "Root: $ROOT_PATH | Boot: ${BOOT_PART:-none} | EFI: ${EFI_PART:-none}"
 
 mkdir -p "$MOUNT_DIR"
-mountpoint -q "$MOUNT_DIR" || mount -o subvol=@,compress=zstd:3,noatime,discard=async,space_cache=v2 "$ROOT_PATH" "$MOUNT_DIR" || mount "$ROOT_PATH" "$MOUNT_DIR" || { echo "Root mount failed."; exit 1; }
+mountpoint -q "$MOUNT_DIR" || mount "$ROOT_PATH" "$MOUNT_DIR" || mount -o subvol=@,compress=zstd:3,noatime,discard=async,space_cache=v2 "$ROOT_PATH" "$MOUNT_DIR" || { echo "Root mount failed."; exit 1; }
 
 if [ ! -f "$MOUNT_DIR/etc/os-release" ]; then
     log "Bootstrapping Arch base..."
@@ -106,6 +106,7 @@ mountpoint -q "$MOUNT_DIR/boot/efi" || mount "$EFI_PART" "$MOUNT_DIR/boot/efi" |
 
 log "Installing GRUB..."
 arch-chroot "$MOUNT_DIR" /bin/bash -c '
+    pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
     pacman -Q grub >/dev/null 2>&1 || { echo "CRITICAL: grub package not installed."; exit 1; }
     grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=BlackArch --removable --recheck || exit 1
