@@ -1,6 +1,6 @@
 #!/bin/bash
 set -uo pipefail
-MOUNT_DIR="/mnt/blackarch"; VG_NAME="black_vg"; POOL_NAME="black_pool"
+MOUNT_DIR="/mnt/blackarch"; VG_NAME="black_pool"; POOL_NAME="black_pool"
 SCRIPT_DIR=""
 for _src in "${ZSH_SOURCE:-}" "${BASH_SOURCE:-}" "${KSH_SOURCE:-}" "$0"; do
     [ -n "$_src" ] && [ -f "$_src" ] && { SCRIPT_DIR="$(cd "$(dirname "$_src")" && pwd)"; break; }

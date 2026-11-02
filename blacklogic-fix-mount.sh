@@ -9,7 +9,7 @@ done
 require_root
 ensure_tools vgscan vgchange lvs lvcreate mkfs.btrfs mount umount btrfs 2>/dev/null || true
 
-VG_NAME="black_vg"
+VG_NAME="black_pool"
 POOL_NAME="black_pool"
 MOUNT_DIR="/mnt/blackarch"
 NEW_SIZE="15.00PiB"

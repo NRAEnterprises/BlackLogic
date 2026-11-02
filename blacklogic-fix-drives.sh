@@ -9,7 +9,7 @@ done
 require_root
 ensure_tools wipefs parted fuser blockdev pvcreate vgcreate vgextend lvcreate lvs vgs pvs 2>/dev/null || true
 
-VG_NAME="black_vg"
+VG_NAME="black_pool"
 echo "=== FIXER: Drives ==="
 
 # Kill any processes holding block devices
