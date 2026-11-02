@@ -32,12 +32,13 @@ ROOT_PATH="/dev/$VG_NAME/$POOL_VOL_NAME"
 
 EFI_PART="${EFI_PART:-}"
 BOOT_PART="${BOOT_PART:-}"
-PRIMARY_DEV="${PRIMARY_DEV:-}"
 
-if [ -z "$EFI_PART" ] && [ -n "$PRIMARY_DEV" ]; then
-    [[ "$PRIMARY_DEV" == *nvme* ]] && PS="p" || PS=""
-    EFI_PART="${PRIMARY_DEV}${PS}1"
-    BOOT_PART="${PRIMARY_DEV}${PS}2"
+if [ -z "$EFI_PART" ]; then
+    EFI_PART=$(blkid -t LABEL="black_EFI" -o device 2>/dev/null | head -n1)
+    [ -z "$EFI_PART" ] && EFI_PART=$(blkid -t LABEL="BLACK-EFI" -o device 2>/dev/null | head -n1)
+fi
+if [ -z "$BOOT_PART" ]; then
+    BOOT_PART=$(blkid -t LABEL="black_boot" -o device 2>/dev/null | head -n1)
 fi
 
 log "Root: $ROOT_PATH | Boot: ${BOOT_PART:-none} | EFI: ${EFI_PART:-none}"
