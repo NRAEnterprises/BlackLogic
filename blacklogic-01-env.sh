@@ -11,46 +11,9 @@ echo "Init: $HOST_INIT | DM: ${HOST_DM:-none}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
-ensure_tools fuser pkill systemctl modprobe swapon mkswap setterm xset 2>/dev/null || true
+ensure_tools systemctl modprobe swapon mkswap 2>/dev/null || true
 
-# Aggressively kill all desktop environments and GUI processes
-for proc in kded5 soliduiserver udisksd kwin_x11 kwin_wayland plasmashell gnome-shell cinnamon-session xfce4-session mate-session lxsession openbox fluxbox i3 sway hyprland waybar polybar picom compton dunst mako notification-daemon; do
-    pkill -9 -f "$proc" 2>/dev/null || true
-done
-
-# Stop display managers only if not in a graphical session (prevents dropping to lock screen)
-if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
-    for dm in gdm sddm lightdm lxdm xdm; do
-        systemctl stop "$dm" 2>/dev/null || true
-        systemctl stop "$dm.service" 2>/dev/null || true
-    done
-    systemctl stop display-manager 2>/dev/null || true
-fi
-systemctl stop udisks2 2>/dev/null || true
-systemctl stop bluetooth 2>/dev/null || true
-systemctl stop cups 2>/dev/null || true
-systemctl stop avahi-daemon 2>/dev/null || true
-
-# Kill all processes on other TTYs - only if we can determine current TTY
-CURRENT_TTY=$(fgconsole 2>/dev/null || true)
-if [ -z "$CURRENT_TTY" ]; then
-    echo "Could not determine current TTY. Skipping TTY cleanup for safety."
-else
-    for tty in 1 2 3 4 5 6 7 8 9 10 11 12; do
-        [ "$tty" -ne "$CURRENT_TTY" ] && fuser -k -9 /dev/tty${tty} >/dev/null 2>&1 || true
-    done
-fi
-
-# Kill any process holding block devices
-for dev in /dev/sd* /dev/nvme* /dev/hd*; do
-    [ -b "$dev" ] && fuser -k -9 "$dev" 2>/dev/null || true
-done
-
-# Lock the session - prevent new logins
-echo "1" > /proc/sys/kernel/sysrq 2>/dev/null || true
-echo "0" > /proc/sys/kernel/sysrq 2>/dev/null || true
-
-# USB power management - aggressive
+# USB power management
 for i in /sys/bus/usb/devices/*/power/control; do
     [ -f "$i" ] && echo on > "$i" 2>/dev/null || true
 done
@@ -69,7 +32,7 @@ if [ -e /dev/zram0 ] && ! swapon --show 2>/dev/null | grep -q "/dev/zram0"; then
     swapon -p 100 /dev/zram0 2>/dev/null || true
 fi
 
-# Disable screen blanking and power management
+# Disable screen blanking
 setterm -blank 0 2>/dev/null || true
 setterm -powersave off 2>/dev/null || true
 xset s off 2>/dev/null || true
@@ -81,17 +44,10 @@ if [ -f "$SCRIPT_DIR/blacklogic-keep-awake.sh" ]; then
 else
     systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
     systemctl stop sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
-    setterm -blank 0 2>/dev/null || true
-    setterm -powersave off 2>/dev/null || true
-    xset s off 2>/dev/null || true
-    xset -dpms 2>/dev/null || true
 fi
 
 # Write state
 echo "HOST_INIT=$HOST_INIT" > /tmp/blacklogic-state
 echo "HOST_DM=$HOST_DM" >> /tmp/blacklogic-state
-echo "CURRENT_TTY=$CURRENT_TTY" >> /tmp/blacklogic-state
 echo "Stage 1 complete."
 exit 0
-EOF
-bash -n blacklogic-01-env.sh && echo "syntax OK"
