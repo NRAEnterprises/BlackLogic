@@ -212,6 +212,8 @@ for D in "${DRIVES[@]}"; do
     for p in $(lsblk -n -o NAME "$DEV" 2>/dev/null); do pvremove -ff -y "/dev/$p" 2>/dev/null || true; done
     clear_foreign_signatures "$DEV"
     sleep 1
+    partprobe "" 2>/dev/null || true
+    blockdev --rereadpt "$DEV" 2>/dev/null || true
 
     if ! parted -s "$DEV" unit MiB mklabel gpt 2>/dev/null; then
         echo "parted mklabel failed on $DEV; retrying after signature clear."
