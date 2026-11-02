@@ -200,6 +200,16 @@ for D in "${DRIVES[@]}"; do
 
     fuser -k -9 "$DEV" 2>/dev/null || true
     for p in $(lsblk -n -o NAME "$DEV" 2>/dev/null); do fuser -k -9 "/dev/$p" 2>/dev/null || true; done
+    for vg in black_pool black_surgery surgery_vg; do
+        if vgs "$vg" &>/dev/null; then
+            for pv in $(pvs --noheadings -o pv_name -S "vg_name=$vg" 2>/dev/null); do
+                [ -z "$pv" ] && continue
+                [[ "$pv" == "$DEV"* ]] && { vgchange -an "$vg" 2>/dev/null || true; vgremove -f "$vg" 2>/dev/null || true; break; }
+            done
+        fi
+    done
+    pvremove -ff -y "$DEV" 2>/dev/null || true
+    for p in $(lsblk -n -o NAME "$DEV" 2>/dev/null); do pvremove -ff -y "/dev/$p" 2>/dev/null || true; done
     clear_foreign_signatures "$DEV"
     sleep 1
 
