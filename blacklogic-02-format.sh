@@ -234,7 +234,7 @@ for D in "${DRIVES[@]}"; do
         fi
         mkfs.btrfs -L black_boot -f "${DEV}${PS}1" >/dev/null 2>&1 || true
         mkfs.fat -F32 -n "BLACK-EFI" "${DEV}${PS}2" >/dev/null 2>&1 || true
-        mkfs.btrfs -L black_surgery -f "${DEV}${PS}3" >/dev/null 2>&1 || true
+        pvcreate -ff -y "${DEV}${PS}3" 2>/dev/null && { if vgs black_surgery &>/dev/null; then vgextend black_surgery "${DEV}${PS}3" 2>/dev/null || true; else vgcreate black_surgery "${DEV}${PS}3" 2>/dev/null || true; fi; } || true
     fi
 
     if ! wait_for_partition "$LVM_PART" "$MAX_PART_WAIT"; then
