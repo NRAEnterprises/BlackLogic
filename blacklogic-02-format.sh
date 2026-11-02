@@ -11,7 +11,7 @@ ensure_tools parted wipefs pvcreate vgcreate vgextend lvcreate lvextend mkfs.fat
 ensure_tools parted wipefs pvcreate vgcreate vgextend lvcreate lvextend mkfs.fat mkfs.btrfs partprobe blkid lsblk jq blockdev udevadm smartctl mdadm fuser pkill systemctl modprobe swapon mkswap lvs vgs pvs mount umount findmnt wget tar zstd 2>/dev/null || true
 
 VG_NAME="black_pool"
-POOL_NAME="pool"
+POOL_NAME="black_pool"
 NEW_SIZE="15.00PiB"
 CHUNK_SIZE="1G"
 STATE_FILE="/tmp/blacklogic-state"
@@ -285,6 +285,11 @@ for D in "${DRIVES[@]}"; do
     fi
 
     mkfs.btrfs -f "/dev/$VG_NAME/blacklogic" >/dev/null 2>&1 || true
+    # Create blacksurgery LV in black_surgery VG
+    if vgs black_surgery &>/dev/null && ! lvs black_surgery/blacksurgery &>/dev/null; then
+        lvcreate -L 4G -n blacksurgery black_surgery 2>/dev/null || true
+        mkfs.btrfs -f "/dev/black_surgery/blacksurgery" >/dev/null 2>&1 || true
+    fi
     record_drive_done "$DEV"
     echo "  $DEV -> blacklogic (pool partition: ${STARTING_POOL_GIB}GiB starting allocation)"
     SUCCESS=1
