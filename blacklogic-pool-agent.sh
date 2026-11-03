@@ -105,7 +105,7 @@ data_pct=${data_pct:-0}
 meta_pct=${meta_pct:-0}
 log "Pool: data=${data_pct}% metadata=${meta_pct}% threshold=${THRESHOLD}%/${META_THRESHOLD}%"
 
-if [ "$data_pct" -ge "$THRESHOLD" ] || [ "$meta_pct" -ge "$META_THRESHOLD" ]; then
+if awk "BEGIN{exit !($data_pct >= $THRESHOLD || $meta_pct >= $META_THRESHOLD)}"; then
     log "Pool usage at/above threshold. Attempting extension..."
     if [ -n "$PRIMARY_DEV" ] && [ -b "$PRIMARY_DEV" ]; then
         extend_pool_from "$PRIMARY_DEV" && { log "Pool extended from primary drive free space."; exit 0; }
