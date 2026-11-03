@@ -108,6 +108,7 @@ if grep -q "geo.mirror.pkgbuild.com" "$MOUNT_DIR/etc/pacman.d/mirrorlist" 2>/dev
 fi
 log "Installing GRUB..."
 arch-chroot "$MOUNT_DIR" /bin/bash -c '
+    if [ ! -s /etc/pacman.d/mirrorlist ] || ! grep -q "geo.mirror.pkgbuild.com" /etc/pacman.d/mirrorlist; then echo "Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch" > /etc/pacman.d/mirrorlist; fi
     pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
     pacman -Q grub >/dev/null 2>&1 || { echo "CRITICAL: grub package not installed."; exit 1; }
