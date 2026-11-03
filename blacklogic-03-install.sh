@@ -117,7 +117,7 @@ if grep -q "geo.mirror.pkgbuild.com" "$MOUNT_DIR/etc/pacman.d/mirrorlist" 2>/dev
 fi
 log "Installing GRUB..."
 arch-chroot "$MOUNT_DIR" /bin/bash -c '
-    if [ ! -s /etc/pacman.d/mirrorlist ] || ! grep -q "geo.mirror.pkgbuild.com" /etc/pacman.d/mirrorlist; then echo "Server = https://geo.mirror.pkgbuild.com/\\$repo/os/\\$arch" > /etc/pacman.d/mirrorlist; fi
+    echo "Server = https://geo.mirror.pkgbuild.com/\\$repo/os/\\$arch" > /etc/pacman.d/mirrorlist
     grep -q '^\[core\]' /etc/pacman.conf || printf "\n[core]\nInclude = /etc/pacman.d/mirrorlist\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
     pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
