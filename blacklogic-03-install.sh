@@ -103,6 +103,15 @@ fi
 
 mountpoint -q "$MOUNT_DIR/boot" || mount "$BOOT_PART" "$MOUNT_DIR/boot" || { echo "Boot lost."; exit 1; }
 mountpoint -q "$MOUNT_DIR/boot/efi" || mount "$EFI_PART" "$MOUNT_DIR/boot/efi" || { echo "EFI lost."; exit 1; }
+# Deduplicate [core]/[extra] sections left by previous runs or BlackArch strap
+awk '
+/^\[core\]$/ || /^\[extra\]$/ {
+    if (seen[$0]++) { skip=1; next }
+    skip=0; print; next
+}
+skip && /^Include = \/etc\/pacman.d\/mirrorlist$/ { next }
+{ skip=0; print }
+' "$MOUNT_DIR/etc/pacman.conf" > "$MOUNT_DIR/etc/pacman.conf.clean" && mv "$MOUNT_DIR/etc/pacman.conf.clean" "$MOUNT_DIR/etc/pacman.conf"
 if grep -q "geo.mirror.pkgbuild.com" "$MOUNT_DIR/etc/pacman.d/mirrorlist" 2>/dev/null; then :; else
     echo "Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch" >> "$MOUNT_DIR/etc/pacman.d/mirrorlist"
 fi
