@@ -48,7 +48,7 @@ mountpoint -q "$MOUNT_DIR" || mount "$ROOT_PATH" "$MOUNT_DIR" || mount -o subvol
 
 if [ ! -f "$MOUNT_DIR/etc/os-release" ]; then
     log "Bootstrapping Arch base..."
-    wget -q -O /tmp/bootstrap.tar.zst https://geo.mirror.pkgbuild.com/iso/latest/archlinux-bootstrap-x86_64.tar.zst || { echo "Download failed."; exit 1; }
+    wget -q -O /tmp/bootstrap.tar.zst https://mirrors.kernel.org/archlinux/iso/latest/archlinux-bootstrap-x86_64.tar.zst || { echo "Download failed."; exit 1; }
     tar -I zstd -xpf /tmp/bootstrap.tar.zst -C "$MOUNT_DIR" --strip-components=1 || { echo "Extract failed."; exit 1; }
     cp /etc/resolv.conf "$MOUNT_DIR/etc/resolv.conf" 2>/dev/null || true
     # Add BlackArch repository
@@ -77,7 +77,7 @@ done
 if [ ! -f "$MOUNT_DIR/etc/os-release" ]; then
     log "Initializing pacman..."
     arch-chroot "$MOUNT_DIR" /bin/bash -c '
-        echo "Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch" > /etc/pacman.d/mirrorlist
+        echo "Server = https://mirrors.kernel.org/archlinux/\$repo/os/\$arch" > /etc/pacman.d/mirrorlist
         pacman-key --init
         pacman-key --populate archlinux
         pacman -Sy --noconfirm archlinux-keyring
@@ -112,12 +112,12 @@ awk '
 skip && /^Include = \/etc\/pacman.d\/mirrorlist$/ { next }
 { skip=0; print }
 ' "$MOUNT_DIR/etc/pacman.conf" > "$MOUNT_DIR/etc/pacman.conf.clean" && mv "$MOUNT_DIR/etc/pacman.conf.clean" "$MOUNT_DIR/etc/pacman.conf"
-if grep -q "geo.mirror.pkgbuild.com" "$MOUNT_DIR/etc/pacman.d/mirrorlist" 2>/dev/null; then :; else
-    echo 'Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch' >> "$MOUNT_DIR/etc/pacman.d/mirrorlist"
+if grep -q "mirrors.kernel.org/archlinux" "$MOUNT_DIR/etc/pacman.d/mirrorlist" 2>/dev/null; then :; else
+    echo 'Server = https://mirrors.kernel.org/archlinux/$repo/os/$arch' >> "$MOUNT_DIR/etc/pacman.d/mirrorlist"
 fi
 log "Installing GRUB..."
 arch-chroot "$MOUNT_DIR" /bin/bash -c '
-    echo "Server = https://geo.mirror.pkgbuild.com/\\$repo/os/\\$arch" > /etc/pacman.d/mirrorlist
+    echo "Server = https://mirrors.kernel.org/archlinux/\\$repo/os/\\$arch" > /etc/pacman.d/mirrorlist
     grep -q '^\[core\]' /etc/pacman.conf || printf "\n[core]\nInclude = /etc/pacman.d/mirrorlist\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
     pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
