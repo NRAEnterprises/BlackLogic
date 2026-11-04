@@ -40,7 +40,14 @@ if [ -f /usr/local/bin/black_aftermath.sh ]; then
     arch-chroot "$MOUNT_DIR" /bin/bash -c "bash /root/black_aftermath.sh" || echo "WARNING: Aftermath script had errors."
 fi
 
-# --- Section 4: Cleanup and reboot ---
+# --- Section 4: Cleanup and reboot --- 
+# Release keep-awake inhibitor
+if [ -f /tmp/blacklogic-keepawake.pid ]; then
+    kill "$(cat /tmp/blacklogic-keepawake.pid)" 2>/dev/null || true
+    rm -f /tmp/blacklogic-keepawake.pid
+fi
+pkill -f "systemd-inhibit.*BlackLogic" 2>/dev/null || true
+
 log "Unmounting and rebooting..."
 umount -R "$MOUNT_DIR" 2>/dev/null || true
 sleep 5
