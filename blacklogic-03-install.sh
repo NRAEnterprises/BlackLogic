@@ -80,7 +80,8 @@ if [ ! -f "$MOUNT_DIR/etc/os-release" ]; then
         echo "Server = https://mirror.rackspace.com/archlinux/\$repo/os/\$arch" > /etc/pacman.d/mirrorlist
         pacman-key --init
         pacman-key --populate archlinux
-        pacman -Sy --noconfirm archlinux-keyring
+        pacman-key --init && pacman-key --populate archlinux
+    pacman -Sy --noconfirm archlinux-keyring
         pacman -Syu --noconfirm
         pacman -S --noconfirm base base-devel linux linux-firmware lvm2 btrfs-progs grub efibootmgr networkmanager vim sudo zram-generator zsh fastfetch
     ' || { echo "Base install failed."; exit 1; }
@@ -116,6 +117,7 @@ printf 'Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch\nServer =
 log "Installing GRUB..."
 arch-chroot "$MOUNT_DIR" /bin/bash -c '
     grep -q '^\[core\]' /etc/pacman.conf || printf "\n[core]\nInclude = /etc/pacman.d/mirrorlist\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
+    pacman-key --init && pacman-key --populate archlinux
     pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
     pacman -Q grub >/dev/null 2>&1 || { echo "CRITICAL: grub package not installed."; exit 1; }
