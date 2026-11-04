@@ -133,6 +133,11 @@ arch-chroot "$MOUNT_DIR" /bin/bash -c '
     pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
     pacman -Q grub >/dev/null 2>&1 || { echo "CRITICAL: grub package not installed."; exit 1; }
+    # Ensure kernel + initramfs present
+    pacman -S --noconfirm --needed linux linux-firmware lvm2 btrfs-progs mkinitcpio || exit 1
+    sed -i "s/block filesystems/block lvm2 filesystems/" /etc/mkinitcpio.conf
+    mkinitcpio -P || exit 1
+    [ -f /boot/vmlinuz-linux ] || { echo "CRITICAL: kernel missing."; exit 1; }
     grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=BlackArch --removable --recheck || exit 1
     grub-mkconfig -o /boot/grub/grub.cfg || exit 1
     # Put BlackArch first in UEFI boot order
