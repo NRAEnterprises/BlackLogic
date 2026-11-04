@@ -112,12 +112,9 @@ awk '
 skip && /^Include = \/etc\/pacman.d\/mirrorlist$/ { next }
 { skip=0; print }
 ' "$MOUNT_DIR/etc/pacman.conf" > "$MOUNT_DIR/etc/pacman.conf.clean" && mv "$MOUNT_DIR/etc/pacman.conf.clean" "$MOUNT_DIR/etc/pacman.conf"
-if grep -q "mirror.rackspace.com/archlinux" "$MOUNT_DIR/etc/pacman.d/mirrorlist" 2>/dev/null; then :; else
-    echo 'Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch' >> "$MOUNT_DIR/etc/pacman.d/mirrorlist"
-fi
+printf 'Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch\nServer = https://mirrors.edge.kernel.org/archlinux/$repo/os/$arch\nServer = https://geo.mirror.pkgbuild.com/$repo/os/$arch\n' > "$MOUNT_DIR/etc/pacman.d/mirrorlist"
 log "Installing GRUB..."
 arch-chroot "$MOUNT_DIR" /bin/bash -c '
-    printf 'Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch\nServer = https://mirrors.edge.kernel.org/archlinux/$repo/os/$arch\nServer = https://geo.mirror.pkgbuild.com/$repo/os/$arch\n' > /etc/pacman.d/mirrorlist
     grep -q '^\[core\]' /etc/pacman.conf || printf "\n[core]\nInclude = /etc/pacman.d/mirrorlist\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
     pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
