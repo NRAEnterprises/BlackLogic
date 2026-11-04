@@ -135,6 +135,10 @@ arch-chroot "$MOUNT_DIR" /bin/bash -c '
     pacman -Q grub >/dev/null 2>&1 || { echo "CRITICAL: grub package not installed."; exit 1; }
     grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=BlackArch --removable --recheck || exit 1
     grub-mkconfig -o /boot/grub/grub.cfg || exit 1
+    # Put BlackArch first in UEFI boot order
+    BA=$(efibootmgr 2>/dev/null | grep -i blackarch | head -1 | grep -o "Boot[0-9A-Fa-f]*" | head -1 | sed "s/Boot//")
+    ORDER=$(efibootmgr 2>/dev/null | sed -n "s/BootOrder: //p" | tr "," "\n" | grep -v "^$BA$" | paste -sd, -)
+    if [ -n "$BA" ]; then efibootmgr -o "$BA${ORDER:+,$ORDER}" 2>/dev/null || true; fi
     echo "root:blackarch" | chpasswd
 ' || { echo "GRUB install failed."; exit 1; }
 
