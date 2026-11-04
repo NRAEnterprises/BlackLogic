@@ -117,7 +117,7 @@ if grep -q "mirror.rackspace.com/archlinux" "$MOUNT_DIR/etc/pacman.d/mirrorlist"
 fi
 log "Installing GRUB..."
 arch-chroot "$MOUNT_DIR" /bin/bash -c '
-    echo "Server = https://mirror.rackspace.com/archlinux/\\$repo/os/\\$arch" > /etc/pacman.d/mirrorlist
+    printf 'Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch\nServer = https://mirrors.edge.kernel.org/archlinux/$repo/os/$arch\nServer = https://geo.mirror.pkgbuild.com/$repo/os/$arch\n' > /etc/pacman.d/mirrorlist
     grep -q '^\[core\]' /etc/pacman.conf || printf "\n[core]\nInclude = /etc/pacman.d/mirrorlist\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
     pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
