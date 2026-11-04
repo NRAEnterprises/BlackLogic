@@ -126,7 +126,7 @@ arch-chroot "$MOUNT_DIR" /bin/bash -c '
     echo "root:blackarch" | chpasswd
 ' || { echo "GRUB install failed."; exit 1; }
 
-if [ ! -f "$MOUNT_DIR/boot/efi/EFI/BlackArch/grubx64.efi" ]; then
+if [ ! -f "$MOUNT_DIR/boot/efi/EFI/BlackArch/grubx64.efi" ] && [ ! -f "$MOUNT_DIR/boot/efi/EFI/BOOT/BOOTX64.EFI" ]; then
     echo "CRITICAL: grubx64.efi missing on EFI partition."
     exit 1
 fi
