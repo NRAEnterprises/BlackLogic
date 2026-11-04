@@ -114,6 +114,18 @@ skip && /^Include = \/etc\/pacman.d\/mirrorlist$/ { next }
 { skip=0; print }
 ' "$MOUNT_DIR/etc/pacman.conf" > "$MOUNT_DIR/etc/pacman.conf.clean" && mv "$MOUNT_DIR/etc/pacman.conf.clean" "$MOUNT_DIR/etc/pacman.conf"
 printf 'Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch\nServer = https://mirrors.edge.kernel.org/archlinux/$repo/os/$arch\nServer = https://geo.mirror.pkgbuild.com/$repo/os/$arch\n' > "$MOUNT_DIR/etc/pacman.d/mirrorlist"
+# Generate /etc/fstab
+if [ ! -f "$MOUNT_DIR/etc/fstab" ] || ! grep -q "$ROOT_PATH" "$MOUNT_DIR/etc/fstab" 2>/dev/null; then
+    ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PATH" 2>/dev/null || true)
+    BOOT_UUID=$(blkid -s UUID -o value "$BOOT_PART" 2>/dev/null || true)
+    EFI_UUID=$(blkid -s UUID -o value "$EFI_PART" 2>/dev/null || true)
+    {
+        [ -n "$ROOT_UUID" ] && echo "UUID=$ROOT_UUID / btrfs subvol=@,compress=zstd:3,noatime,discard=async,space_cache=v2 0 0"
+        [ -n "$BOOT_UUID" ] && echo "UUID=$BOOT_UUID /boot ext4 defaults 0 2"
+        [ -n "$EFI_UUID" ] && echo "UUID=$EFI_UUID /boot/efi vfat defaults 0 2"
+    } > "$MOUNT_DIR/etc/fstab"
+fi
+
 log "Installing GRUB..."
 arch-chroot "$MOUNT_DIR" /bin/bash -c '
     grep -q '^\[core\]' /etc/pacman.conf || printf "\n[core]\nInclude = /etc/pacman.d/mirrorlist\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
