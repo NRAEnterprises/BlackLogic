@@ -13,8 +13,7 @@ VG_NAME="black_pool"
 POOL_NAME="black_pool"
 POOL_VOL_NAME="blacklogic"
 MOUNT_DIR="/mnt/blackarch"
-LOG_FILE="/var/log/blacklogic-install.log"
-exec > >(tee -a "$LOG_FILE") 2>&1
+LOG_FILE="/var/log/blacklogic.log"
 STATE_FILE="/tmp/blacklogic-state"
 
 log() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG_FILE"; }
