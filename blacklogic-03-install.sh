@@ -97,7 +97,8 @@ if [ ! -f "$MOUNT_DIR/etc/os-release" ]; then
         systemctl enable NetworkManager
         printf "[zram0]\nzram-size = ram / 2\ncompression-algorithm = zstd\n" > /etc/systemd/zram-generator.conf
         printf "activation {\n thin_pool_autoextend_threshold = 70\n thin_pool_autoextend_percent = 20\n}\n" >> /etc/lvm/lvm.conf
-        sed -i "s/block filesystems/block lvm2 filesystems/" /etc/mkinitcpio.conf
+        sed -i "s/^MODULES=.*/MODULES=(btrfs)/" /etc/mkinitcpio.conf
+        sed -i "s/^HOOKS=.*/HOOKS=(base udev autodetect modconf block lvm2 filesystems keyboard fsck)/" /etc/mkinitcpio.conf
         mkinitcpio -P
     ' || { echo "Config failed."; exit 1; }
 fi
