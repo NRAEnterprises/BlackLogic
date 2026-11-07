@@ -83,7 +83,7 @@ if [ ! -f "$MOUNT_DIR/etc/os-release" ]; then
         pacman-key --init && pacman-key --populate archlinux
     pacman -Sy --noconfirm archlinux-keyring
         pacman -Syu --noconfirm
-        pacman -S --noconfirm base base-devel linux linux-firmware lvm2 btrfs-progs grub efibootmgr networkmanager vim sudo zram-generator zsh fastfetch plymouth
+        pacman -S --noconfirm base base-devel linux linux-firmware lvm2 btrfs-progs grub efibootmgr networkmanager sddm vim sudo zram-generator zsh fastfetch plymouth
     ' || { echo "Base install failed."; exit 1; }
 
     log "Configuring system..."
@@ -95,6 +95,7 @@ if [ ! -f "$MOUNT_DIR/etc/os-release" ]; then
         locale-gen
         echo "LANG=en_US.UTF-8" > /etc/locale.conf
         systemctl enable NetworkManager
+        systemctl enable sddm
         printf "[zram0]\nzram-size = ram / 2\ncompression-algorithm = zstd\n" > /etc/systemd/zram-generator.conf
         printf "activation {\n thin_pool_autoextend_threshold = 70\n thin_pool_autoextend_percent = 20\n}\n" >> /etc/lvm/lvm.conf
         sed -i "s/^MODULES=.*/MODULES=(btrfs)/" /etc/mkinitcpio.conf
@@ -133,7 +134,8 @@ arch-chroot "$MOUNT_DIR" /bin/bash -c '
     pacman-key --init && pacman-key --populate archlinux
     pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
-    pacman -S --noconfirm --needed plymouth || true
+    pacman -S --noconfirm --needed plymouth sddm || true
+    systemctl enable sddm 2>/dev/null || true
     pacman -Q grub >/dev/null 2>&1 || { echo "CRITICAL: grub package not installed."; exit 1; }
     # Ensure kernel + initramfs present
     pacman -S --noconfirm --needed linux linux-firmware lvm2 btrfs-progs mkinitcpio || exit 1
