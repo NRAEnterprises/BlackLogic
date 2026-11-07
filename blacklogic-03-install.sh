@@ -122,6 +122,7 @@ arch-chroot "$MOUNT_DIR" /bin/bash -c '
     grep -q '^\[core\]' /etc/pacman.conf || printf "\n[core]\nInclude = /etc/pacman.d/mirrorlist\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
     pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
+    pacman -S --noconfirm --needed plymouth || true
     pacman -Q grub >/dev/null 2>&1 || { echo "CRITICAL: grub package not installed."; exit 1; }
     grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=BlackArch --removable --recheck || exit 1
     sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"rd.lvm.vg=black_pool\"|" /etc/default/grub
