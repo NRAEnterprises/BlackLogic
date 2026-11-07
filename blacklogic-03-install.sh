@@ -133,6 +133,7 @@ arch-chroot "$MOUNT_DIR" /bin/bash -c '
     pacman-key --init && pacman-key --populate archlinux
     pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
+    pacman -S --noconfirm --needed plymouth || true
     pacman -Q grub >/dev/null 2>&1 || { echo "CRITICAL: grub package not installed."; exit 1; }
     # Ensure kernel + initramfs present
     pacman -S --noconfirm --needed linux linux-firmware lvm2 btrfs-progs mkinitcpio || exit 1
