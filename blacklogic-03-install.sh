@@ -134,8 +134,8 @@ arch-chroot "$MOUNT_DIR" /bin/bash -c '
     pacman-key --init && pacman-key --populate archlinux
     pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
-    pacman -S --noconfirm --needed plymouth sddm || true
-    systemctl enable sddm 2>/dev/null || true
+    pacman -S --noconfirm --needed plymouth sddm || exit 1
+    [ -f /usr/lib/systemd/system/sddm.service ] || { echo "CRITICAL: sddm service missing."; exit 1; }
     pacman -Q grub >/dev/null 2>&1 || { echo "CRITICAL: grub package not installed."; exit 1; }
     # Ensure kernel + initramfs present
     pacman -S --noconfirm --needed linux linux-firmware lvm2 btrfs-progs mkinitcpio || exit 1
