@@ -82,7 +82,7 @@ if [ ! -f "$MOUNT_DIR/etc/os-release" ]; then
         pacman-key --populate archlinux
         pacman -Sy --noconfirm archlinux-keyring
         pacman -Syu --noconfirm
-        pacman -S --noconfirm base base-devel linux linux-firmware lvm2 btrfs-progs grub efibootmgr networkmanager vim sudo zram-generator zsh fastfetch
+        pacman -S --noconfirm base base-devel linux linux-firmware lvm2 btrfs-progs grub efibootmgr networkmanager vim sudo zram-generator zsh fastfetch plymouth
     ' || { echo "Base install failed."; exit 1; }
 
     log "Configuring system..."
@@ -124,6 +124,8 @@ arch-chroot "$MOUNT_DIR" /bin/bash -c '
     pacman -S --noconfirm grub efibootmgr || exit 1
     pacman -Q grub >/dev/null 2>&1 || { echo "CRITICAL: grub package not installed."; exit 1; }
     grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=BlackArch --removable --recheck || exit 1
+    sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"rd.lvm.vg=black_pool\"|" /etc/default/grub
+    grep -q "^GRUB_CMDLINE_LINUX=" /etc/default/grub || echo "GRUB_CMDLINE_LINUX=\"rd.lvm.vg=black_pool\"" >> /etc/default/grub
     grub-mkconfig -o /boot/grub/grub.cfg || exit 1
     # Put BlackArch first in UEFI boot order
     BA=$(efibootmgr 2>/dev/null | grep -i blackarch | head -1 | grep -o "Boot[0-9A-Fa-f]*" | head -1 | sed "s/Boot//")
