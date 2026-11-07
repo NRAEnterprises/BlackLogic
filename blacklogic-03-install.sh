@@ -44,7 +44,7 @@ fi
 log "Root: $ROOT_PATH | Boot: ${BOOT_PART:-none} | EFI: ${EFI_PART:-none}"
 
 mkdir -p "$MOUNT_DIR"
-mountpoint -q "$MOUNT_DIR" || mount "$ROOT_PATH" "$MOUNT_DIR" || mount -o subvol=@,compress=zstd:3,noatime,discard=async,space_cache=v2 "$ROOT_PATH" "$MOUNT_DIR" || { echo "Root mount failed."; exit 1; }
+mountpoint -q "$MOUNT_DIR" || mount -o subvol=@,compress=zstd:3,noatime,discard=async,space_cache=v2 "$ROOT_PATH" "$MOUNT_DIR" || mount "$ROOT_PATH" "$MOUNT_DIR" || { echo "Root mount failed."; exit 1; }
 
 if [ ! -f "$MOUNT_DIR/etc/os-release" ]; then
     log "Bootstrapping Arch base..."
@@ -130,7 +130,7 @@ fi
 
 log "Installing GRUB..."
 arch-chroot "$MOUNT_DIR" /bin/bash -c '
-    grep -q '^\[core\]' /etc/pacman.conf || printf "\n[core]\nInclude = /etc/pacman.d/mirrorlist\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
+    grep -q "^\\[core\\]" /etc/pacman.conf || printf "\n[core]\nInclude = /etc/pacman.d/mirrorlist\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
     pacman-key --init && pacman-key --populate archlinux
     pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
@@ -139,7 +139,7 @@ arch-chroot "$MOUNT_DIR" /bin/bash -c '
     pacman -Q grub >/dev/null 2>&1 || { echo "CRITICAL: grub package not installed."; exit 1; }
     # Ensure kernel + initramfs present
     pacman -S --noconfirm --needed linux linux-firmware lvm2 btrfs-progs mkinitcpio || exit 1
-    sed -i "s/block filesystems/block lvm2 filesystems/" /etc/mkinitcpio.conf
+    grep -q 'lvm2' /etc/mkinitcpio.conf || sed -i "s/block filesystems/block lvm2 filesystems/" /etc/mkinitcpio.conf
     mkinitcpio -P || exit 1
     [ -f /boot/vmlinuz-linux ] || { echo "CRITICAL: kernel missing."; exit 1; }
     grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=BlackArch --removable --recheck || exit 1
