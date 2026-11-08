@@ -99,7 +99,7 @@ if [ ! -f "$MOUNT_DIR/etc/os-release" ]; then
         printf "[zram0]\nzram-size = ram / 2\ncompression-algorithm = zstd\n" > /etc/systemd/zram-generator.conf
         printf "activation {\n thin_pool_autoextend_threshold = 70\n thin_pool_autoextend_percent = 20\n}\n" >> /etc/lvm/lvm.conf
         sed -i "s/^MODULES=.*/MODULES=(btrfs)/" /etc/mkinitcpio.conf
-        sed -i "s/^HOOKS=.*/HOOKS=(base udev autodetect modconf block lvm2 filesystems keyboard fsck)/" /etc/mkinitcpio.conf
+        sed -i "s/^HOOKS=.*/HOOKS=(base udev autodetect modconf block lvm2 filesystems keyboard)/" /etc/mkinitcpio.conf
         mkinitcpio -P
     ' || { echo "Config failed."; exit 1; }
 fi
@@ -134,7 +134,11 @@ arch-chroot "$MOUNT_DIR" /bin/bash -c '
     pacman-key --init && pacman-key --populate archlinux
     pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
-    pacman -S --noconfirm --needed plymouth sddm || exit 1
+    pacman -S --noconfirm --needed linux linux-firmware lvm2 btrfs-progs mkinitcpio plymouth sddm || exit 1
+    sed -i "s/^MODULES=.*/MODULES=(btrfs)/" /etc/mkinitcpio.conf
+    sed -i "s/^HOOKS=.*/HOOKS=(base udev autodetect modconf block lvm2 filesystems keyboard)/" /etc/mkinitcpio.conf
+    mkinitcpio -P || exit 1
+    [ -f /boot/vmlinuz-linux ] || { echo "CRITICAL: kernel missing."; exit 1; }
     [ -f /usr/lib/systemd/system/sddm.service ] || { echo "CRITICAL: sddm service missing."; exit 1; }
     pacman -Q grub >/dev/null 2>&1 || { echo "CRITICAL: grub package not installed."; exit 1; }
     # Ensure kernel + initramfs present
@@ -144,8 +148,8 @@ arch-chroot "$MOUNT_DIR" /bin/bash -c '
     mkinitcpio -P || exit 1
     [ -f /boot/vmlinuz-linux ] || { echo "CRITICAL: kernel missing."; exit 1; }
     grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=BlackArch --removable --recheck || exit 1
-    sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"rd.lvm.vg=black_pool\"|" /etc/default/grub
-    grep -q "^GRUB_CMDLINE_LINUX=" /etc/default/grub || echo "GRUB_CMDLINE_LINUX=\"rd.lvm.vg=black_pool\"" >> /etc/default/grub
+    sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"rd.lvm.vg=black_pool rd.lvm.lv=black_pool/black_pool rd.lvm.lv=black_pool/blacklogic\"|" /etc/default/grub
+    grep -q "^GRUB_CMDLINE_LINUX=" /etc/default/grub || echo "GRUB_CMDLINE_LINUX=\"rd.lvm.vg=black_pool rd.lvm.lv=black_pool/black_pool rd.lvm.lv=black_pool/blacklogic\"" >> /etc/default/grub
     grub-mkconfig -o /boot/grub/grub.cfg || exit 1
     # Put BlackArch first in UEFI boot order
     BA=$(efibootmgr 2>/dev/null | grep -i blackarch | head -1 | grep -o "Boot[0-9A-Fa-f]*" | head -1 | sed "s/Boot//")
