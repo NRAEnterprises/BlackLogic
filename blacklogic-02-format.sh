@@ -131,7 +131,7 @@ if vgs "$VG_NAME" &>/dev/null; then
             fi
         done < <(lsblk -J -b -o NAME,TYPE 2>/dev/null | jq -r '.blockdevices[]? | select(.type=="disk") | select(.name|startswith("zram")|not) | select(.name|startswith("loop")|not) | .name')
 
-        if [ "$NEED_FORMAT" -eq 0 ]; then
+        if [ "$NEED_FORMAT" -eq 0 ] && blkid -s TYPE -o value "/dev/$VG_NAME/blacklogic" 2>/dev/null | grep -q btrfs; then
             echo "Pool is COMPLETE. All physical drives are in $VG_NAME."
             exit 0
         fi
