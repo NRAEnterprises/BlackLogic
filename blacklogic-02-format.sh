@@ -182,7 +182,7 @@ while IFS= read -r DEV_NAME; do
     DRIVES+=("$DEV|$CLASS")
 done < <(lsblk -J -b -o NAME,TYPE 2>/dev/null | jq -r '.blockdevices[]? | select(.type=="disk") | select(.name|startswith("zram")|not) | select(.name|startswith("loop")|not) | .name')
 
-[ "${#DRIVES[@]}" -eq 0 ] && { echo "No unclaimed drives to format."; exit 0; }
+[ "${#DRIVES[@]}" -eq 0 ] && { if blkid -s TYPE -o value "/dev/$VG_NAME/blacklogic" 2>/dev/null | grep -q btrfs; then echo "No unclaimed drives to format."; exit 0; else echo "Root LV invalid; recreating..."; lvchange -ay "$VG_NAME/blacklogic" 2>/dev/null || true; if lvs "$VG_NAME/blacklogic" &>/dev/null; then lvremove -f "$VG_NAME/blacklogic" 2>/dev/null || true; fi; lvcreate -V "$NEW_SIZE" --thinpool "$POOL_NAME" -n "blacklogic" "$VG_NAME" 2>/dev/null && { lvchange -ay "$VG_NAME/blacklogic"; mkfs.btrfs -f "/dev/$VG_NAME/blacklogic" && { mkdir -p /tmp/blacklogic-mnt; mount "/dev/$VG_NAME/blacklogic" /tmp/blacklogic-mnt && { btrfs subvolume create /tmp/blacklogic-mnt/@ 2>/dev/null || true; umount /tmp/blacklogic-mnt; }; }; }; exit 0; fi; }
 
 SUCCESS=0
 for D in "${DRIVES[@]}"; do
