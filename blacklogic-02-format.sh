@@ -302,7 +302,8 @@ for D in "${DRIVES[@]}"; do
     fi
 
     NEXT=$(lvs --noheadings -o lv_name "$VG_NAME" 2>/dev/null | grep -c "black_drive" || true)
-    if ! lvs "$VG_NAME/blacklogic" &>/dev/null; then
+    if ! lvs "$VG_NAME/blacklogic" &>/dev/null || ! blkid -s TYPE -o value "/dev/$VG_NAME/blacklogic" 2>/dev/null | grep -q btrfs; then
+        if lvs "$VG_NAME/blacklogic" &>/dev/null; then lvremove -f "$VG_NAME/blacklogic" 2>/dev/null || true; fi
         if ! lvcreate -V "$NEW_SIZE" --thinpool "$POOL_NAME" -n "blacklogic" "$VG_NAME" 2>/dev/null; then
             echo "lvcreate root LV failed on $DEV"
             continue
