@@ -12,7 +12,7 @@ ensure_tools parted wipefs pvcreate vgcreate vgextend lvcreate lvextend mkfs.fat
 
 VG_NAME="black_pool"
 POOL_NAME="black_pool"
-NEW_SIZE="15.00PiB"
+NEW_SIZE="64GiB"
 CHUNK_SIZE="1G"
 STATE_FILE="/tmp/blacklogic-state"
 LOG_FILE="/var/log/blacklogic-format.log"
@@ -314,7 +314,7 @@ for D in "${DRIVES[@]}"; do
 
     mkfs.btrfs -f "/dev/$VG_NAME/blacklogic" || { echo "mkfs.btrfs failed"; continue; }
     mkdir -p /tmp/blacklogic-mnt 2>/dev/null || true
-    mount "/dev/$VG_NAME/blacklogic" /tmp/blacklogic-mnt 2>/dev/null && { btrfs subvolume create /tmp/blacklogic-mnt/@ 2>/dev/null || true; umount /tmp/blacklogic-mnt 2>/dev/null || true; }
+    mount "/dev/$VG_NAME/blacklogic" /tmp/blacklogic-mnt 2>/dev/null && { timeout 30 btrfs subvolume create /tmp/blacklogic-mnt/@ 2>/dev/null || true; umount /tmp/blacklogic-mnt 2>/dev/null || true; }
     # Create blacksurgery LV in black_surgery VG
     if vgs black_surgery &>/dev/null && ! lvs black_surgery/blacksurgery &>/dev/null; then
         lvcreate -L 4G -n blacksurgery black_surgery 2>/dev/null || true
