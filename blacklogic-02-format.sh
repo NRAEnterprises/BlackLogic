@@ -302,15 +302,17 @@ for D in "${DRIVES[@]}"; do
     fi
 
     NEXT=$(lvs --noheadings -o lv_name "$VG_NAME" 2>/dev/null | grep -c "black_drive" || true)
+    lvchange -ay "$VG_NAME/blacklogic" 2>/dev/null || true
     if ! lvs "$VG_NAME/blacklogic" &>/dev/null || ! blkid -s TYPE -o value "/dev/$VG_NAME/blacklogic" 2>/dev/null | grep -q btrfs; then
         if lvs "$VG_NAME/blacklogic" &>/dev/null; then lvremove -f "$VG_NAME/blacklogic" 2>/dev/null || true; fi
         if ! lvcreate -V "$NEW_SIZE" --thinpool "$POOL_NAME" -n "blacklogic" "$VG_NAME" 2>/dev/null; then
             echo "lvcreate root LV failed on $DEV"
             continue
         fi
+        lvchange -ay "$VG_NAME/blacklogic" 2>/dev/null || true
     fi
 
-    mkfs.btrfs -f "/dev/$VG_NAME/blacklogic" >/dev/null 2>&1 || true
+    mkfs.btrfs -f "/dev/$VG_NAME/blacklogic" || { echo "mkfs.btrfs failed"; continue; }
     mkdir -p /tmp/blacklogic-mnt 2>/dev/null || true
     mount "/dev/$VG_NAME/blacklogic" /tmp/blacklogic-mnt 2>/dev/null && { btrfs subvolume create /tmp/blacklogic-mnt/@ 2>/dev/null || true; umount /tmp/blacklogic-mnt 2>/dev/null || true; }
     # Create blacksurgery LV in black_surgery VG
