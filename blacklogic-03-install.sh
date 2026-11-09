@@ -126,7 +126,8 @@ arch-chroot "$MOUNT_DIR" /bin/bash -c '
     sed -i "s/^MODULES=.*/MODULES=(btrfs)/" /etc/mkinitcpio.conf
     sed -i "s/^HOOKS=.*/HOOKS=(base udev autodetect modconf block lvm2 filesystems keyboard)/" /etc/mkinitcpio.conf
     mkinitcpio -P || exit 1
-    [ -f /boot/vmlinuz-linux ] || { echo "CRITICAL: kernel missing."; exit 1; }
+    [ -r /boot/vmlinuz-linux ] || { echo "Kernel not readable, reinstalling..."; pacman -S --noconfirm --overwrite * linux linux-firmware || exit 1; }
+    [ -r /boot/vmlinuz-linux ] || { echo "CRITICAL: kernel missing or unreadable."; exit 1; }
     [ -f /usr/lib/systemd/system/sddm.service ] || { echo "CRITICAL: sddm service missing."; exit 1; }
     pacman -Q grub >/dev/null 2>&1 || { echo "CRITICAL: grub package not installed."; exit 1; }
     grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=BlackArch --removable --recheck || exit 1
