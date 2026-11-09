@@ -139,17 +139,9 @@ arch-chroot "$MOUNT_DIR" /bin/bash -c '
     [ -r /boot/vmlinuz-linux ] || { echo "CRITICAL: kernel missing or unreadable."; exit 1; }
     sed -i "s/^MODULES=.*/MODULES=(btrfs)/" /etc/mkinitcpio.conf
     sed -i "s/^HOOKS=.*/HOOKS=(base udev autodetect modconf block lvm2 filesystems keyboard)/" /etc/mkinitcpio.conf
-    [ -r /boot/vmlinuz-linux ] || { echo "Kernel not readable, reinstalling..."; pacman -S --noconfirm --overwrite \* linux linux-firmware || exit 1; }
-    [ -r /boot/vmlinuz-linux ] || { echo "CRITICAL: kernel missing or unreadable."; exit 1; }
     mkinitcpio -P || exit 1
     [ -f /usr/lib/systemd/system/sddm.service ] || { echo "CRITICAL: sddm service missing."; exit 1; }
     pacman -Q grub >/dev/null 2>&1 || { echo "CRITICAL: grub package not installed."; exit 1; }
-    # Ensure kernel + initramfs present
-    pacman -S --noconfirm --needed linux linux-firmware lvm2 btrfs-progs mkinitcpio || exit 1
-    grep -q "MODULES=(btrfs)" /etc/mkinitcpio.conf || sed -i "s/^MODULES=.*/MODULES=(btrfs)/" /etc/mkinitcpio.conf
-    grep -q "lvm2" /etc/mkinitcpio.conf || sed -i "s/block filesystems/block lvm2 filesystems/" /etc/mkinitcpio.conf
-    mkinitcpio -P || exit 1
-    [ -f /boot/vmlinuz-linux ] || { echo "CRITICAL: kernel missing."; exit 1; }
     grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=BlackArch --removable --recheck || exit 1
     sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"rd.lvm.vg=black_pool rd.lvm.lv=black_pool/black_pool rd.lvm.lv=black_pool/blacklogic\"|" /etc/default/grub
     grep -q "^GRUB_CMDLINE_LINUX=" /etc/default/grub || echo "GRUB_CMDLINE_LINUX=\"rd.lvm.vg=black_pool rd.lvm.lv=black_pool/black_pool rd.lvm.lv=black_pool/blacklogic\"" >> /etc/default/grub
