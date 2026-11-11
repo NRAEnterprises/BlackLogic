@@ -123,7 +123,7 @@ if [ ! -f "$MOUNT_DIR/etc/fstab" ] || ! grep -q "$ROOT_PATH" "$MOUNT_DIR/etc/fst
     EFI_UUID=$(blkid -s UUID -o value "$EFI_PART" 2>/dev/null || true)
     {
         [ -n "$ROOT_UUID" ] && echo "UUID=$ROOT_UUID / btrfs subvol=@,compress=zstd:3,noatime,discard=async,space_cache=v2 0 0"
-        [ -n "$BOOT_UUID" ] && echo "UUID=$BOOT_UUID /boot ext4 defaults 0 2"
+        [ -n "$BOOT_UUID" ] && echo "UUID=$BOOT_UUID /boot btrfs defaults 0 2"
         [ -n "$EFI_UUID" ] && echo "UUID=$EFI_UUID /boot/efi vfat defaults 0 2"
     } > "$MOUNT_DIR/etc/fstab"
 fi
