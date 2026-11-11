@@ -44,7 +44,10 @@ fi
 log "Root: $ROOT_PATH | Boot: ${BOOT_PART:-none} | EFI: ${EFI_PART:-none}"
 
 mkdir -p "$MOUNT_DIR"
+kilo/astute-mill-ays
 mountpoint -q "$MOUNT_DIR" || mount -o subvol=@,compress=zstd:3,noatime,discard=async,space_cache=v2 "$ROOT_PATH" "$MOUNT_DIR" || { echo "Root mount failed."; exit 1; }
+mountpoint -q "$MOUNT_DIR" || mount -o subvol=@,compress=zstd:3,noatime,discard=async,space_cache=v2 "$ROOT_PATH" "$MOUNT_DIR" || mount "$ROOT_PATH" "$MOUNT_DIR" || { echo "Root mount failed."; exit 1; }
+ main
 
 if [ ! -f "$MOUNT_DIR/etc/os-release" ]; then
     log "Bootstrapping Arch base..."
@@ -80,9 +83,13 @@ if [ ! -f "$MOUNT_DIR/etc/os-release" ]; then
         echo "Server = https://mirror.rackspace.com/archlinux/\$repo/os/\$arch" > /etc/pacman.d/mirrorlist
         pacman-key --init
         pacman-key --populate archlinux
-        pacman -Sy --noconfirm archlinux-keyring
+        pacman-key --init && pacman-key --populate archlinux
+    pacman -Sy --noconfirm archlinux-keyring
         pacman -Syu --noconfirm
+kilo/astute-mill-ays
         pacman -S --noconfirm base base-devel linux linux-firmware lvm2 btrfs-progs grub efibootmgr networkmanager vim sudo zram-generator zsh fastfetch plymouth sddm
+        pacman -S --noconfirm base base-devel linux linux-firmware lvm2 btrfs-progs grub efibootmgr networkmanager sddm vim sudo zram-generator zsh fastfetch plymouth
+        main
     ' || { echo "Base install failed."; exit 1; }
 
     log "Configuring system..."
@@ -141,16 +148,35 @@ awk '
 skip && /^Include = \/etc\/pacman.d\/mirrorlist$/ { next }
 { skip=0; print }
 ' "$MOUNT_DIR/etc/pacman.conf" > "$MOUNT_DIR/etc/pacman.conf.clean" && mv "$MOUNT_DIR/etc/pacman.conf.clean" "$MOUNT_DIR/etc/pacman.conf"
+kilo/astute-mill-ays
 if grep -q "mirror.rackspace.com" "$MOUNT_DIR/etc/pacman.d/mirrorlist" 2>/dev/null; then :; else
     echo 'Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch' >> "$MOUNT_DIR/etc/pacman.d/mirrorlist"
+
+printf 'Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch\nServer = https://mirrors.edge.kernel.org/archlinux/$repo/os/$arch\nServer = https://geo.mirror.pkgbuild.com/$repo/os/$arch\n' > "$MOUNT_DIR/etc/pacman.d/mirrorlist"
+# Generate /etc/fstab
+if [ ! -f "$MOUNT_DIR/etc/fstab" ] || ! grep -q "$ROOT_PATH" "$MOUNT_DIR/etc/fstab" 2>/dev/null; then
+    ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PATH" 2>/dev/null || true)
+    BOOT_UUID=$(blkid -s UUID -o value "$BOOT_PART" 2>/dev/null || true)
+    EFI_UUID=$(blkid -s UUID -o value "$EFI_PART" 2>/dev/null || true)
+    {
+        [ -n "$ROOT_UUID" ] && echo "UUID=$ROOT_UUID / btrfs subvol=@,compress=zstd:3,noatime,discard=async,space_cache=v2 0 0"
+        [ -n "$BOOT_UUID" ] && echo "UUID=$BOOT_UUID /boot btrfs defaults 0 2"
+        [ -n "$EFI_UUID" ] && echo "UUID=$EFI_UUID /boot/efi vfat defaults 0 2"
+    } > "$MOUNT_DIR/etc/fstab"
+main
 fi
 
 log "Installing GRUB..."
 arch-chroot "$MOUNT_DIR" /bin/bash -c '
+kilo/astute-mill-ays
     if [ ! -s /etc/pacman.d/mirrorlist ] || ! grep -q "mirror.rackspace.com" /etc/pacman.d/mirrorlist; then
         echo "Server = https://mirror.rackspace.com/archlinux/\$repo/os/\$arch" > /etc/pacman.d/mirrorlist
     fi
     grep -q "^\\[core\\]" /etc/pacman.conf || printf "\n[core]\nInclude = /etc/pacman.d/mirrorlist\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
+
+    grep -q "^\\[core\\]" /etc/pacman.conf || printf "\n[core]\nInclude = /etc/pacman.d/mirrorlist\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
+    pacman-key --init && pacman-key --populate archlinux
+main
     pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
     pacman -S --noconfirm --needed linux linux-firmware lvm2 btrfs-progs mkinitcpio plymouth sddm || exit 1

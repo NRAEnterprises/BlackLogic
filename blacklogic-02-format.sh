@@ -182,6 +182,7 @@ while IFS= read -r DEV_NAME; do
     DRIVES+=("$DEV|$CLASS")
 done < <(lsblk -J -b -o NAME,TYPE 2>/dev/null | jq -r '.blockdevices[]? | select(.type=="disk") | select(.name|startswith("zram")|not) | select(.name|startswith("loop")|not) | .name')
 
+ kilo/astute-mill-ays
 [ "${#DRIVES[@]}" -eq 0 ] && { 
     if blkid -s TYPE -o value "/dev/$VG_NAME/blacklogic" 2>/dev/null | grep -q btrfs; then
         echo "No unclaimed drives to format."
@@ -205,6 +206,9 @@ done < <(lsblk -J -b -o NAME,TYPE 2>/dev/null | jq -r '.blockdevices[]? | select
         exit 0
     fi
 }
+=======
+[ "${#DRIVES[@]}" -eq 0 ] && { if blkid -s TYPE -o value "/dev/$VG_NAME/blacklogic" 2>/dev/null | grep -q btrfs; then echo "No unclaimed drives to format."; exit 0; else echo "Root LV invalid; recreating..."; lvchange -ay "$VG_NAME/blacklogic" 2>/dev/null || true; if lvs "$VG_NAME/blacklogic" &>/dev/null; then lvremove -f "$VG_NAME/blacklogic" 2>/dev/null || true; fi; if lvcreate -V "$NEW_SIZE" --thinpool "$POOL_NAME" -n "blacklogic" "$VG_NAME" 2>/dev/null; then lvchange -ay "$VG_NAME/blacklogic"; mkfs.btrfs -f "/dev/$VG_NAME/blacklogic" && { mkdir -p /tmp/blacklogic-mnt; mount "/dev/$VG_NAME/blacklogic" /tmp/blacklogic-mnt && { btrfs subvolume create /tmp/blacklogic-mnt/@ 2>/dev/null || true; umount /tmp/blacklogic-mnt; }; }; else echo "Thin pool failed; purging VG to rebuild from scratch."; vgchange -an "$VG_NAME" 2>/dev/null || true; for pv in $(pvs --noheadings -o pv_name -S "vg_name=$VG_NAME" 2>/dev/null); do pvremove -ff -y "$pv" 2>/dev/null || true; done; vgremove -f "$VG_NAME" 2>/dev/null || true; fi; exit 0; fi; }
+main
 
 SUCCESS=0
 for D in "${DRIVES[@]}"; do
@@ -348,10 +352,13 @@ for D in "${DRIVES[@]}"; do
         lvchange -ay "$VG_NAME/blacklogic" 2>/dev/null || true
     fi
 
+ kilo/astute-mill-ays
     if ! mkfs.btrfs -f "/dev/$VG_NAME/blacklogic"; then
         echo "mkfs.btrfs failed on $DEV"
         continue
     fi
+    mkfs.btrfs -f "/dev/$VG_NAME/blacklogic" || { echo "mkfs.btrfs failed"; continue; }
+main
     mkdir -p /tmp/blacklogic-mnt 2>/dev/null || true
     if ! mount "/dev/$VG_NAME/blacklogic" /tmp/blacklogic-mnt; then
         echo "Failed to mount root LV on $DEV"
