@@ -12,7 +12,9 @@ ensure_tools parted wipefs pvcreate vgcreate vgextend lvcreate lvextend mkfs.fat
 
 VG_NAME="black_pool"
 POOL_NAME="black_pool"
-NEW_SIZE="64GiB"
+# This is a thin-provisioned virtual root capacity, not space allocated up front.
+# The thin pool only consumes physical extents as data is written.
+NEW_SIZE="15PiB"
 CHUNK_SIZE="1G"
 STATE_FILE="/tmp/blacklogic-state"
 LOG_FILE="/var/log/blacklogic-format.log"
