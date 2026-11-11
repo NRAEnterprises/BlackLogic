@@ -8,7 +8,6 @@ done
 [ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
 require_root
 ensure_tools parted wipefs pvcreate vgcreate vgextend lvcreate lvextend mkfs.fat mkfs.btrfs partprobe blkid lsblk jq blockdev udevadm smartctl mdadm fuser pkill systemctl modprobe swapon mkswap lvs vgs pvs mount umount findmnt wget tar zstd 2>/dev/null || true
-ensure_tools parted wipefs pvcreate vgcreate vgextend lvcreate lvextend mkfs.fat mkfs.btrfs partprobe blkid lsblk jq blockdev udevadm smartctl mdadm fuser pkill systemctl modprobe swapon mkswap lvs vgs pvs mount umount findmnt wget tar zstd 2>/dev/null || true
 
 VG_NAME="black_pool"
 POOL_NAME="black_pool"
@@ -20,6 +19,7 @@ PROGRESS_FILE="/tmp/blacklogic-progress"
 STARTING_POOL_GIB="64"
 LOCK_FILE="/tmp/blacklogic-format.lock"
 MAX_PART_WAIT="60"
+EFI_PART_SAVED=0
 
 mkdir -p /tmp
 : > "$PROGRESS_FILE"
@@ -131,7 +131,7 @@ if vgs "$VG_NAME" &>/dev/null; then
             fi
         done < <(lsblk -J -b -o NAME,TYPE 2>/dev/null | jq -r '.blockdevices[]? | select(.type=="disk") | select(.name|startswith("zram")|not) | select(.name|startswith("loop")|not) | .name')
 
-        if [ "$NEED_FORMAT" -eq 0 ]; then
+        if [ "$NEED_FORMAT" -eq 0 ] && blkid -s TYPE -o value "/dev/$VG_NAME/blacklogic" 2>/dev/null | grep -q btrfs; then
             echo "Pool is COMPLETE. All physical drives are in $VG_NAME."
             exit 0
         fi
@@ -182,7 +182,29 @@ while IFS= read -r DEV_NAME; do
     DRIVES+=("$DEV|$CLASS")
 done < <(lsblk -J -b -o NAME,TYPE 2>/dev/null | jq -r '.blockdevices[]? | select(.type=="disk") | select(.name|startswith("zram")|not) | select(.name|startswith("loop")|not) | .name')
 
-[ "${#DRIVES[@]}" -eq 0 ] && { echo "No unclaimed drives to format."; exit 0; }
+[ "${#DRIVES[@]}" -eq 0 ] && { 
+    if blkid -s TYPE -o value "/dev/$VG_NAME/blacklogic" 2>/dev/null | grep -q btrfs; then
+        echo "No unclaimed drives to format."
+        exit 0
+    else
+        echo "Root LV invalid; recreating..."
+        lvchange -ay "$VG_NAME/blacklogic" 2>/dev/null || true
+        if lvs "$VG_NAME/blacklogic" &>/dev/null; then lvremove -f "$VG_NAME/blacklogic" 2>/dev/null || true; fi
+        if lvcreate -V "$NEW_SIZE" --thinpool "$POOL_NAME" -n "blacklogic" "$VG_NAME" 2>/dev/null; then
+            lvchange -ay "$VG_NAME/blacklogic"
+            if mkfs.btrfs -f "/dev/$VG_NAME/blacklogic"; then
+                mkdir -p /tmp/blacklogic-mnt
+                mount "/dev/$VG_NAME/blacklogic" /tmp/blacklogic-mnt && { btrfs subvolume create /tmp/blacklogic-mnt/@ 2>/dev/null || true; umount /tmp/blacklogic-mnt; }
+            fi
+        else
+            echo "Thin pool failed; purging VG to rebuild from scratch."
+            vgchange -an "$VG_NAME" 2>/dev/null || true
+            for pv in $(pvs --noheadings -o pv_name -S "vg_name=$VG_NAME" 2>/dev/null); do pvremove -ff -y "$pv" 2>/dev/null || true; done
+            vgremove -f "$VG_NAME" 2>/dev/null || true
+        fi
+        exit 0
+    fi
+}
 
 SUCCESS=0
 for D in "${DRIVES[@]}"; do
@@ -256,9 +278,23 @@ for D in "${DRIVES[@]}"; do
             parted -s "$DEV" unit MiB mkpart black_pool 5121MiB "$((5121 + STARTING_POOL_GIB * 1024))MiB" >/dev/null 2>&1 || { echo "Failed creating pool partition on $DEV"; continue; }
             LVM_PART="${DEV}${PS}4"
         fi
-        mkfs.btrfs -L black_boot -f "${DEV}${PS}1" >/dev/null 2>&1 || true
-        mkfs.fat -F32 -n "BLACK-EFI" "${DEV}${PS}2" >/dev/null 2>&1 || true
-        pvcreate -ff -y "${DEV}${PS}3" 2>/dev/null && { if vgs black_surgery &>/dev/null; then vgextend black_surgery "${DEV}${PS}3" 2>/dev/null || true; else vgcreate black_surgery "${DEV}${PS}3" 2>/dev/null || true; fi; } || true
+        if ! mkfs.btrfs -L black_boot -f "${DEV}${PS}1" >/dev/null 2>&1; then
+            echo "Failed to format boot partition on $DEV"
+            continue
+        fi
+        if ! mkfs.fat -F32 -n "BLACK-EFI" "${DEV}${PS}2" >/dev/null 2>&1; then
+            echo "Failed to format EFI partition on $DEV"
+            continue
+        fi
+        if ! pvcreate -ff -y "${DEV}${PS}3" 2>/dev/null; then
+            echo "Failed to create PV on surgery partition $DEV"
+            continue
+        fi
+        if vgs black_surgery &>/dev/null; then
+            vgextend black_surgery "${DEV}${PS}3" 2>/dev/null || true
+        else
+            vgcreate black_surgery "${DEV}${PS}3" 2>/dev/null || true
+        fi
     fi
 
     if ! wait_for_partition "$LVM_PART" "$MAX_PART_WAIT"; then
@@ -302,21 +338,39 @@ for D in "${DRIVES[@]}"; do
     fi
 
     NEXT=$(lvs --noheadings -o lv_name "$VG_NAME" 2>/dev/null | grep -c "black_drive" || true)
+    lvchange -ay "$VG_NAME/blacklogic" 2>/dev/null || true
     if ! lvs "$VG_NAME/blacklogic" &>/dev/null || ! blkid -s TYPE -o value "/dev/$VG_NAME/blacklogic" 2>/dev/null | grep -q btrfs; then
         if lvs "$VG_NAME/blacklogic" &>/dev/null; then lvremove -f "$VG_NAME/blacklogic" 2>/dev/null || true; fi
         if ! lvcreate -V "$NEW_SIZE" --thinpool "$POOL_NAME" -n "blacklogic" "$VG_NAME" 2>/dev/null; then
             echo "lvcreate root LV failed on $DEV"
             continue
         fi
+        lvchange -ay "$VG_NAME/blacklogic" 2>/dev/null || true
     fi
 
-    mkfs.btrfs -f "/dev/$VG_NAME/blacklogic" >/dev/null 2>&1 || true
+    if ! mkfs.btrfs -f "/dev/$VG_NAME/blacklogic"; then
+        echo "mkfs.btrfs failed on $DEV"
+        continue
+    fi
     mkdir -p /tmp/blacklogic-mnt 2>/dev/null || true
-    mount "/dev/$VG_NAME/blacklogic" /tmp/blacklogic-mnt 2>/dev/null && { timeout 30 btrfs subvolume create /tmp/blacklogic-mnt/@ 2>/dev/null || true; umount /tmp/blacklogic-mnt 2>/dev/null || true; }
+    if ! mount "/dev/$VG_NAME/blacklogic" /tmp/blacklogic-mnt; then
+        echo "Failed to mount root LV on $DEV"
+        continue
+    fi
+    btrfs subvolume create /tmp/blacklogic-mnt/@ 2>/dev/null || true
+    umount /tmp/blacklogic-mnt 2>/dev/null || true
     # Create blacksurgery LV in black_surgery VG
     if vgs black_surgery &>/dev/null && ! lvs black_surgery/blacksurgery &>/dev/null; then
         lvcreate -L 4G -n blacksurgery black_surgery 2>/dev/null || true
         mkfs.btrfs -f "/dev/black_surgery/blacksurgery" >/dev/null 2>&1 || true
+    fi
+    # Save boot and EFI partition paths for install stage (first drive with these partitions)
+    if [ "$CLASS" -ne 10 ] && [ -z "${EFI_PART_SAVED:-}" ]; then
+        EFI_PART="${DEV}${PS}2"
+        BOOT_PART="${DEV}${PS}1"
+        echo "EFI_PART=$EFI_PART" >> "$STATE_FILE"
+        echo "BOOT_PART=$BOOT_PART" >> "$STATE_FILE"
+        EFI_PART_SAVED=1
     fi
     record_drive_done "$DEV"
     echo "  $DEV -> blacklogic (pool partition: ${STARTING_POOL_GIB}GiB starting allocation)"
