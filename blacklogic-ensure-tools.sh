@@ -6,24 +6,24 @@
 # Only fails if all methods are exhausted
 
 ensure_tools() {
-    local missing=""
+    local missing=()
     for cmd in "$@"; do
-        command -v "$cmd" >/dev/null 2>&1 || missing="$missing $cmd"
+        command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
     done
-    [ -z "$missing" ] && return 0
-    echo "Missing tools:$missing - attempting install..."
+    [ ${#missing[@]} -eq 0 ] && return 0
+    echo "Missing tools: ${missing[*]} - attempting install..."
 
     # Primary: network install
     if command -v pacman >/dev/null 2>&1; then
         pacman -Sy --noconfirm 2>/dev/null || true
-        pacman -S --noconfirm --needed $missing 2>/dev/null && return 0
+        pacman -S --noconfirm --needed "${missing[@]}" 2>/dev/null && return 0
     elif command -v apt-get >/dev/null 2>&1; then
         apt-get update -qq 2>/dev/null || true
-        apt-get install -y $missing 2>/dev/null && return 0
+        apt-get install -y "${missing[@]}" 2>/dev/null && return 0
     elif command -v dnf >/dev/null 2>&1; then
-        dnf install -y $missing 2>/dev/null && return 0
+        dnf install -y "${missing[@]}" 2>/dev/null && return 0
     elif command -v yum >/dev/null 2>&1; then
-        yum install -y $missing 2>/dev/null && return 0
+        yum install -y "${missing[@]}" 2>/dev/null && return 0
     fi
 
     # Secondary: USB device search
@@ -34,15 +34,21 @@ ensure_tools() {
         for pkg in /tmp/usbtool/*; do
             [ -f "$pkg" ] || continue
             case "$pkg" in
-                *.pkg.tar.zst|*.pkg.tar.xz) pacman -U --noconfirm "$pkg" 2>/dev/null && { umount /tmp/usbtool 2>/dev/null; return 0; } ;;
-                *.deb) dpkg -i "$pkg" 2>/dev/null && { umount /tmp/usbtool 2>/dev/null; return 0; } ;;
-                *.rpm) rpm -i "$pkg" 2>/dev/null && { umount /tmp/usbtool 2>/dev/null; return 0; } ;;
+                *.pkg.tar.zst|*.pkg.tar.xz)
+                    pacman -U --noconfirm "$pkg" 2>/dev/null && { umount /tmp/usbtool 2>/dev/null; return 0; }
+                    ;;
+                *.deb)
+                    dpkg -i "$pkg" 2>/dev/null && { umount /tmp/usbtool 2>/dev/null; return 0; }
+                    ;;
+                *.rpm)
+                    rpm -i "$pkg" 2>/dev/null && { umount /tmp/usbtool 2>/dev/null; return 0; }
+                    ;;
             esac
         done
         umount /tmp/usbtool 2>/dev/null || true
     done
 
-    echo "FATAL: Could not install:$missing" >&2
+    echo "FATAL: Could not install: ${missing[*]}" >&2
     return 1
 }
 

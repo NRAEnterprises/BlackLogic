@@ -28,11 +28,7 @@ fail() { echo "[$(date +%F_%T)] FATAL: $*" | tee -a "$LOG_FILE" >&2; exit 1; }
 [ -f "$STATE_FILE" ] && source "$STATE_FILE"
 export LIVE_DRIVE
 
-require_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "Missing: $1"; exit 1; }; }
-for c in lvs vgs lvcreate lvextend pvcreate vgextend parted partprobe blockdev lsblk wipefs jq btrfs df udevadm flock mdadm; do
-    command -v "$c" >/dev/null 2>&1 || true
-done
-
+# Prevent concurrent execution
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
     log "Another agent instance is running. Exiting."
@@ -42,16 +38,20 @@ fi
 vgchange -ay "$VG_NAME" 2>/dev/null || true
 udevadm settle 2>/dev/null || true
 sleep 1
+
 if [ ! -b "/dev/$VG_NAME/$POOL_NAME" ] && [ ! -b "/dev/mapper/${VG_NAME}-${POOL_NAME}" ]; then
     log "Thin pool not found, nothing to manage."
     exit 0
 fi
 
-[ -z "${PRIMARY_DEV:-}" ] && PRIMARY_DEV=$(pvs --noheadings -o pv_name -S "vg_name=$VG_NAME" 2>/dev/null | head -n1 | tr -d ' ')
+PRIMARY_DEV="${PRIMARY_DEV:-}"
+[ -z "$PRIMARY_DEV" ] && PRIMARY_DEV=$(pvs --noheadings -o pv_name -S "vg_name=$VG_NAME" 2>/dev/null | head -n1 | tr -d ' ')
 
 clear_foreign_signatures() {
     local dev="$1"
     mdadm --zero-superblock "$dev" 2>/dev/null || true
+    zpool labelclear -f "$dev" 2>/dev/null || true
+    dmraid -r -E "$dev" 2>/dev/null || true
     wipefs -a "$dev" 2>/dev/null || true
 }
 
@@ -80,27 +80,47 @@ extend_pool_from() {
     free_bytes=$(free_space_bytes "$dev")
     need=$((EXTEND_STEP_GIB * 1024 * 1024 * 1024))
     [ "$free_bytes" -gt "$need" ] || return 1
-    read -r _ start_b < <(parted -s "$dev" unit B print 2>/dev/null | awk '/^[[:space:]]*[0-9]+/{print $2,$3; end=$3} END{print ""}' | tail -n1)
-    start_b=${start_b:-0}
-    [ "$start_b" -eq 0 ] && start_b=2048
+
+    start_b=$(parted -s "$dev" unit B print 2>/dev/null | awk '/^[[:space:]]*[0-9]+/{end=$3} END{gsub(/[^0-9]/,"",end); print end+0}')
+    [ -z "$start_b" ] && start_b=2048
     end_b=$((start_b + need))
+
     [[ "$dev" == *nvme* ]] && ps="p" || ps=""
     next_num=$(lsblk -n -o NAME "$dev" 2>/dev/null | grep -cE '[0-9]$' || echo 0)
     next_num=$((next_num + 1))
     np="${dev}${ps}${next_num}"
-    parted -s "$dev" mkpart primary "pool-ext" "${start_b}B" "${end_b}B" || return 1
+
+    if ! parted -s "$dev" mkpart primary "pool-ext" "${start_b}B" "${end_b}B" 2>/dev/null; then
+        return 1
+    fi
     partprobe "$dev" 2>/dev/null || true
     udevadm settle 2>/dev/null || true
-    wait_for_partition "$np" "$MAX_PART_WAIT" || return 1
+
+    if ! wait_for_partition "$np" "$MAX_PART_WAIT"; then
+        return 1
+    fi
+
     clear_foreign_signatures "$np"
-    pvcreate -y "$np" 2>/dev/null || return 1
-    vgextend "$VG_NAME" "$np" 2>/dev/null || return 1
-    lvextend -L +"${EXTEND_STEP_GIB}G" "/dev/$VG_NAME/$POOL_NAME" 2>/dev/null || return 1
+    if ! pvcreate -y "$np" 2>/dev/null; then
+        return 1
+    fi
+    if ! vgextend "$VG_NAME" "$np" 2>/dev/null; then
+        pvremove -ff -y "$np" 2>/dev/null || true
+        return 1
+    fi
+    if ! lvextend -L +"${EXTEND_STEP_GIB}G" "/dev/$VG_NAME/$POOL_NAME" 2>/dev/null; then
+        return 1
+    fi
     log "Extended pool by ${EXTEND_STEP_GIB}GiB using $np"
     return 0
 }
 
-read -r data_pct meta_pct < <(lvs --noheadings -o data_percent,metadata_percent "/dev/$VG_NAME/$POOL_NAME" 2>/dev/null | awk '{gsub(/%/,"",$1); gsub(/%/,"",$2); print $1, $2}')
+# Get pool usage
+data_pct=0
+meta_pct=0
+if lvs "/dev/$VG_NAME/$POOL_NAME" &>/dev/null; then
+    read -r data_pct meta_pct < <(lvs --noheadings -o data_percent,metadata_percent "/dev/$VG_NAME/$POOL_NAME" 2>/dev/null | awk '{gsub(/%/,"",$1); gsub(/%/,"",$2); print $1, $2}')
+fi
 data_pct=${data_pct:-0}
 meta_pct=${meta_pct:-0}
 log "Pool: data=${data_pct}% metadata=${meta_pct}% threshold=${THRESHOLD}%/${META_THRESHOLD}%"
@@ -108,13 +128,19 @@ log "Pool: data=${data_pct}% metadata=${meta_pct}% threshold=${THRESHOLD}%/${MET
 if awk "BEGIN{exit !($data_pct >= $THRESHOLD || $meta_pct >= $META_THRESHOLD)}"; then
     log "Pool usage at/above threshold. Attempting extension..."
     if [ -n "$PRIMARY_DEV" ] && [ -b "$PRIMARY_DEV" ]; then
-        extend_pool_from "$PRIMARY_DEV" && { log "Pool extended from primary drive free space."; exit 0; }
+        if extend_pool_from "$PRIMARY_DEV"; then
+            log "Pool extended from primary drive free space."
+            exit 0
+        fi
     fi
     for d in $(lsblk -J -b -o NAME,TYPE 2>/dev/null | jq -r '.blockdevices[]? | select(.type=="disk") | select(.name|startswith("zram")|not) | select(.name|startswith("loop")|not) | .name' 2>/dev/null); do
         dev="/dev/$d"
         [ "$dev" = "$PRIMARY_DEV" ] && continue
         lsblk -n -o MOUNTPOINT "$dev" 2>/dev/null | grep -q "/" && continue
-        extend_pool_from "$dev" && { log "Pool extended from $dev."; exit 0; }
+        if extend_pool_from "$dev"; then
+            log "Pool extended from $dev."
+            exit 0
+        fi
     done
     log "WARNING: No extendable space found. Pool may run out."
 fi
@@ -126,22 +152,26 @@ if lvs "$VG_NAME/$META_LV" &>/dev/null; then
     META_USED=${META_USED:-0}
     if awk "BEGIN{exit !($META_USED >= $META_THRESHOLD)}"; then
         log "Metadata LV at ${META_USED}%. Extending metadata."
-        lvextend -L +1G "/dev/$VG_NAME/$META_LV" 2>/dev/null || log "Metadata extend failed."
+        if ! lvextend -L +1G "/dev/$VG_NAME/$META_LV" 2>/dev/null; then
+            log "Metadata extend failed."
+        fi
     fi
 fi
 
+# Root FS check
 ROOT_PATH="/dev/$VG_NAME/$POOL_VOL_NAME"
 if [ -b "$ROOT_PATH" ] && mountpoint -q "$MOUNT_DIR" 2>/dev/null; then
     root_used=$(df --output=pcent "$MOUNT_DIR" 2>/dev/null | tail -n1 | tr -dc '0-9')
     root_used=${root_used:-0}
     if [ "$root_used" -ge 80 ]; then
         log "Root FS at ${root_used}%. Extending thin volume."
-        lvextend -V +"${EXTEND_STEP_GIB}G" --thinpool "$POOL_NAME" "$VG_NAME/$POOL_VOL_NAME" 2>/dev/null || log "Thin volume extend failed."
-        btrfs filesystem resize max "$MOUNT_DIR" 2>/dev/null || log "Btrfs resize failed."
+        if ! lvextend -V +"${EXTEND_STEP_GIB}G" --thinpool "$POOL_NAME" "$VG_NAME/$POOL_VOL_NAME" 2>/dev/null; then
+            log "Thin volume extend failed."
+        else
+            btrfs filesystem resize max "$MOUNT_DIR" 2>/dev/null || log "Btrfs resize failed."
+        fi
     fi
 fi
 
 log "Agent check complete."
 exit 0
-EOF
-bash -n blacklogic-pool-agent.sh && echo "syntax OK"

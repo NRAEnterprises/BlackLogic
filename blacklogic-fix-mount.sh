@@ -12,7 +12,7 @@ ensure_tools vgscan vgchange lvs lvcreate mkfs.btrfs mount umount btrfs 2>/dev/n
 VG_NAME="black_pool"
 POOL_NAME="black_pool"
 MOUNT_DIR="/mnt/blackarch"
-NEW_SIZE="15.00PiB"
+NEW_SIZE="64GiB"
 CHUNK_SIZE="1G"
 
 echo "=== FIXER: Mount ==="
@@ -21,7 +21,7 @@ if mountpoint -q "$MOUNT_DIR"; then
 fi
 
 vgscan --mknodes >/dev/null 2>&1 || true
-vgchange -ay --activationmode partial "$VG_NAME" >/dev/null 2>&1 || true
+vgchange -ay "$VG_NAME" >/dev/null 2>&1 || true
 udevadm settle >/dev/null 2>&1 || true
 vgs "$VG_NAME" &>/dev/null || { echo "VG missing."; exit 1; }
 
@@ -37,15 +37,24 @@ if [ -n "${ROOT_LV:-}" ] && [ -b "/dev/$VG_NAME/$ROOT_LV" ]; then
 fi
 
 if ! lvs "$VG_NAME/$POOL_NAME" &>/dev/null; then
-    lvcreate --type thin-pool -l 90%VG -c "$CHUNK_SIZE" -n "$POOL_NAME" "$VG_NAME" || exit 1
+    lvcreate --type thin-pool -l 90%VG -c "$CHUNK_SIZE" -n "$POOL_NAME" "$VG_NAME" || { echo "Failed to create thin pool"; exit 1; }
 fi
 
-lvcreate -V "$NEW_SIZE" --thinpool "$POOL_NAME" -n root "$VG_NAME" || exit 1
-mkfs.btrfs -f "/dev/$VG_NAME/root" || exit 1
+# Activate the thin pool
+lvchange -ay "$VG_NAME/$POOL_NAME" 2>/dev/null || true
+udevadm settle 2>/dev/null || true
+sleep 1
+
+lvcreate -V "$NEW_SIZE" --thinpool "$POOL_NAME" -n root "$VG_NAME" || { echo "Failed to create root LV"; exit 1; }
+lvchange -ay "$VG_NAME/root" 2>/dev/null || true
+udevadm settle 2>/dev/null || true
+sleep 1
+
+mkfs.btrfs -f "/dev/$VG_NAME/root" || { echo "Failed to format root LV"; exit 1; }
 mkdir -p "$MOUNT_DIR"
-mount "/dev/$VG_NAME/root" "$MOUNT_DIR" || exit 1
-btrfs subvolume create "$MOUNT_DIR/@" || true
-umount "$MOUNT_DIR" || true
+mount "/dev/$VG_NAME/root" "$MOUNT_DIR" || { echo "Failed to mount root LV"; exit 1; }
+btrfs subvolume create "$MOUNT_DIR/@" 2>/dev/null || true
+umount "$MOUNT_DIR" 2>/dev/null || true
 ROOT_LV="root"
 
 [ -b "/dev/$VG_NAME/$ROOT_LV" ] || { echo "Root device still invalid."; exit 1; }

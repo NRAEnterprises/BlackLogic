@@ -1,43 +1,53 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-echo "=== 1. Updating Package Lists ==="
-pacman -Sy --noconfirm
+log() { echo "[$(date +%H:%M:%S)] $*"; }
+warn() { echo "[$(date +%H:%M:%S)] WARNING: $*" >&2; }
+fail() { echo "[$(date +%H:%M:%S)] FATAL: $*" >&2; exit 1; }
 
-echo "=== 2. Installing Core Environment Packages ==="
-pacman -S --needed --noconfirm zsh git jq curl fastfetch iproute2 procps-ng figlet
+# Ensure we're in chroot with pacman
+command -v pacman >/dev/null 2>&1 || fail "pacman not found; not in Arch chroot"
 
-echo "=== 3. Creating Directory Structure ==="
+log "=== 1. Updating Package Lists ==="
+pacman -Sy --noconfirm || fail "pacman -Sy failed"
+
+log "=== 2. Installing Core Environment Packages ==="
+pkgs=(zsh git jq curl fastfetch iproute2 procps-ng figlet)
+for pkg in "${pkgs[@]}"; do
+    pacman -Q "$pkg" >/dev/null 2>&1 || pacman -S --needed --noconfirm "$pkg" || warn "Failed to install $pkg"
+done
+
+log "=== 3. Creating Directory Structure ==="
 mkdir -p ~/bin
 mkdir -p ~/.cache/zsh-extras
 mkdir -p ~/.local/share/fastfetch/presets
 mkdir -p ~/.oh-my-zsh/custom/plugins
 
-sleep 2
+sleep 1
 
-echo "=== 4. Backing up existing .zshrc ==="
+log "=== 4. Backing up existing .zshrc ==="
 if [ -f ~/.zshrc ]; then
     cp ~/.zshrc ~/.zshrc.bak.$(date +%s)
-    echo "backed up existing .zshrc"
+    log "backed up existing .zshrc"
 fi
 
-echo "=== 5. Installing oh-my-zsh & Plugins ==="
+log "=== 5. Installing oh-my-zsh & Plugins ==="
 if [ ! -f "$HOME/.oh-my-zsh/oh-my-zsh.sh" ]; then
     rm -rf ~/.oh-my-zsh
-    git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git ~/.oh-my-zsh
+    git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git ~/.oh-my-zsh || warn "oh-my-zsh clone failed"
 fi
 
 if [ ! -d ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions ]; then
-    git clone --depth=1 https://github.com/zsh-users/zsh-autosuggestions.git ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions
+    git clone --depth=1 https://github.com/zsh-users/zsh-autosuggestions.git ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions || warn "zsh-autosuggestions clone failed"
 fi
 
 if [ ! -d ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting ]; then
-    git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting.git ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
+    git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting.git ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting || warn "zsh-syntax-highlighting clone failed"
 fi
 
 sleep 1
 
-echo "=== 6. Writing ~/.zshrc ==="
+log "=== 6. Writing ~/.zshrc ==="
 cat <<'ZSH_EOF' > ~/.zshrc
 # ─── Shell behavior ────────────────────────────────────────────
 HISTFILE=~/.histfile
@@ -88,7 +98,7 @@ ZSH_EOF
 
 sleep 1
 
-echo "=== 7. Writing ~/bin/termux-header.sh ==="
+log "=== 7. Writing ~/bin/termux-header.sh ==="
 cat <<'MOTD_EOF' > ~/bin/termux-header.sh
 #!/usr/bin/env bash
 # termux-header.sh — MOTD: hardware banner + system/network/security snapshot
@@ -253,11 +263,11 @@ printf '\n'
 MOTD_EOF
 
 chmod +x ~/bin/termux-header.sh
-bash -n ~/bin/termux-header.sh && echo "─── wrote ~/bin/termux-header.sh ───"
+bash -n ~/bin/termux-header.sh && log "wrote ~/bin/termux-header.sh"
 
 sleep 1
 
-echo "=== 8. Writing Fastfetch Preset ==="
+log "=== 8. Writing Fastfetch Preset ==="
 cat <<'FF_EOF' > ~/.local/share/fastfetch/presets/termux.jsonc
 {
     "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
@@ -285,20 +295,21 @@ cat <<'FF_EOF' > ~/.local/share/fastfetch/presets/termux.jsonc
     ]
 }
 FF_EOF
-echo "─── wrote fastfetch preset ───"
+log "wrote fastfetch preset"
 
-echo "=== 9. Final Environment Configuration ==="
+log "=== 9. Final Environment Configuration ==="
 if [ "$(id -u)" -eq 0 ]; then
-    usermod -s /usr/bin/zsh root
+    usermod -s /usr/bin/zsh root 2>/dev/null || true
 else
-    usermod -s /usr/bin/zsh "$USER"
+    usermod -s /usr/bin/zsh "$USER" 2>/dev/null || true
 fi
 
 if command -v npm >/dev/null 2>&1; then
-    npm config set prefix ~/.local
+    npm config set prefix ~/.local 2>/dev/null || true
 fi
 
 grep -q 'HOME/.local/bin' ~/.zshrc || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 
-echo "─── Setup Complete ───"
-echo "Log out and back in for chsh to take effect, or run: exec zsh"
+log "Setup Complete"
+log "Log out and back in for chsh to take effect, or run: exec zsh"
+exit 0

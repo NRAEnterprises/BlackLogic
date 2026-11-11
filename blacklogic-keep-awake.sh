@@ -55,12 +55,25 @@ xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-on-ac-off -s 0 
 if command -v systemd-inhibit >/dev/null 2>&1; then
     # Kill any existing keep-awake inhibitor
     if [ -f /tmp/blacklogic-keepawake.pid ]; then
-        kill "$(cat /tmp/blacklogic-keepawake.pid)" 2>/dev/null || true
+        old_pid=$(cat /tmp/blacklogic-keepawake.pid 2>/dev/null)
+        if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+            kill "$old_pid" 2>/dev/null || true
+        fi
         rm -f /tmp/blacklogic-keepawake.pid
     fi
+    # Also kill any orphaned inhibitors
+    pkill -f "systemd-inhibit.*BlackLogic.*sleep 999999999" 2>/dev/null || true
+
     # Start new inhibitor (sleep 999999999 keeps the lock held)
     systemd-inhibit --what=sleep:shutdown:idle:handle-lid-switch --who="BlackLogic" --why="Long-running installation process" --mode=block sleep 999999999 >/dev/null 2>&1 &
-    echo $! > /tmp/blacklogic-keepawake.pid
+    new_pid=$!
+    # Verify the process is actually running
+    sleep 0.5
+    if kill -0 "$new_pid" 2>/dev/null; then
+        echo "$new_pid" > /tmp/blacklogic-keepawake.pid
+    else
+        echo "WARNING: systemd-inhibit failed to start" >&2
+    fi
 fi
 
 # Also use xautolock disable if available
