@@ -1,5 +1,6 @@
 #!/bin/bash
-set -uo pipefail
+set -Eeuo pipefail
+
 SCRIPT_DIR=""
 for _src in "${ZSH_SOURCE:-}" "${BASH_SOURCE:-}" "${KSH_SOURCE:-}" "$0"; do
     [ -n "$_src" ] && [ -f "$_src" ] && { SCRIPT_DIR="$(cd "$(dirname "$_src")" && pwd)"; break; }
@@ -7,7 +8,7 @@ done
 [ -z "$SCRIPT_DIR" ] && SCRIPT_DIR="$(pwd)"
 [ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
 require_root
-ensure_tools mkfs.fat mkfs.btrfs parted btrfs arch-chroot wget tar zstd mount umount 2>/dev/null || true
+ensure_tools mkfs.fat mkfs.btrfs parted btrfs arch-chroot wget tar zstd mount umount curl 2>/dev/null || true
 
 VG_NAME="black_pool"
 POOL_NAME="black_pool"
@@ -44,21 +45,18 @@ fi
 log "Root: $ROOT_PATH | Boot: ${BOOT_PART:-none} | EFI: ${EFI_PART:-none}"
 
 mkdir -p "$MOUNT_DIR"
-kilo/astute-mill-ays
-mountpoint -q "$MOUNT_DIR" || mount -o subvol=@,compress=zstd:3,noatime,discard=async,space_cache=v2 "$ROOT_PATH" "$MOUNT_DIR" || { echo "Root mount failed."; exit 1; }
 mountpoint -q "$MOUNT_DIR" || mount -o subvol=@,compress=zstd:3,noatime,discard=async,space_cache=v2 "$ROOT_PATH" "$MOUNT_DIR" || mount "$ROOT_PATH" "$MOUNT_DIR" || { echo "Root mount failed."; exit 1; }
- main
 
 if [ ! -f "$MOUNT_DIR/etc/os-release" ]; then
     log "Bootstrapping Arch base..."
     wget -q -O /tmp/bootstrap.tar.zst https://geo.mirror.pkgbuild.com/iso/latest/archlinux-bootstrap-x86_64.tar.zst || { echo "Download failed."; exit 1; }
     tar -I zstd -xpf /tmp/bootstrap.tar.zst -C "$MOUNT_DIR" --strip-components=1 || { echo "Extract failed."; exit 1; }
     cp /etc/resolv.conf "$MOUNT_DIR/etc/resolv.conf" 2>/dev/null || true
-    # Add BlackArch repository
+
     arch-chroot "$MOUNT_DIR" /bin/bash -c '
-        curl -s https://blackarch.org/strap.sh -o /tmp/strap.sh 2>/dev/null || wget -q -O /tmp/strap.sh https://blackarch.org/strap.sh
+        curl -fsSL https://blackarch.org/strap.sh -o /tmp/strap.sh || wget -q -O /tmp/strap.sh https://blackarch.org/strap.sh || true
         chmod +x /tmp/strap.sh
-        /tmp/strap.sh || echo "BlackArch strap skipped (keyring unavailable)"
+        /tmp/strap.sh 2>/dev/null || echo "BlackArch strap skipped (keyring unavailable)"
     ' 2>/dev/null || true
 fi
 
@@ -80,16 +78,12 @@ done
 if [ ! -f "$MOUNT_DIR/etc/os-release" ]; then
     log "Initializing pacman..."
     arch-chroot "$MOUNT_DIR" /bin/bash -c '
-        echo "Server = https://mirror.rackspace.com/archlinux/\$repo/os/\$arch" > /etc/pacman.d/mirrorlist
+        echo "Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch" > /etc/pacman.d/mirrorlist
         pacman-key --init
         pacman-key --populate archlinux
-        pacman-key --init && pacman-key --populate archlinux
-    pacman -Sy --noconfirm archlinux-keyring
+        pacman -Sy --noconfirm archlinux-keyring
         pacman -Syu --noconfirm
-kilo/astute-mill-ays
         pacman -S --noconfirm base base-devel linux linux-firmware lvm2 btrfs-progs grub efibootmgr networkmanager vim sudo zram-generator zsh fastfetch plymouth sddm
-        pacman -S --noconfirm base base-devel linux linux-firmware lvm2 btrfs-progs grub efibootmgr networkmanager sddm vim sudo zram-generator zsh fastfetch plymouth
-        main
     ' || { echo "Base install failed."; exit 1; }
 
     log "Configuring system..."
@@ -113,7 +107,6 @@ fi
 mountpoint -q "$MOUNT_DIR/boot" || mount "$BOOT_PART" "$MOUNT_DIR/boot" || { echo "Boot lost."; exit 1; }
 mountpoint -q "$MOUNT_DIR/boot/efi" || mount "$EFI_PART" "$MOUNT_DIR/boot/efi" || { echo "EFI lost."; exit 1; }
 
-# Generate fstab before GRUB
 log "Generating fstab..."
 ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PATH" 2>/dev/null || true)
 BOOT_UUID=""
@@ -139,48 +132,36 @@ fi
 log "fstab generated:"
 cat "$MOUNT_DIR/etc/fstab" | tee -a "$LOG_FILE"
 
-# Deduplicate [core]/[extra] sections left by previous runs or BlackArch strap
-awk '
-/^\[core\]$/ || /^\[extra\]$/ {
-    if (seen[$0]++) { skip=1; next }
-    skip=0; print; next
-}
-skip && /^Include = \/etc\/pacman.d\/mirrorlist$/ { next }
-{ skip=0; print }
-' "$MOUNT_DIR/etc/pacman.conf" > "$MOUNT_DIR/etc/pacman.conf.clean" && mv "$MOUNT_DIR/etc/pacman.conf.clean" "$MOUNT_DIR/etc/pacman.conf"
-kilo/astute-mill-ays
-if grep -q "mirror.rackspace.com" "$MOUNT_DIR/etc/pacman.d/mirrorlist" 2>/dev/null; then :; else
-    echo 'Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch' >> "$MOUNT_DIR/etc/pacman.d/mirrorlist"
+if [ -f "$MOUNT_DIR/etc/pacman.conf" ]; then
+    awk '
+    /^\[core\]$/ || /^\[extra\]$/ {
+        if (seen[$0]++) { skip=1; next }
+        skip=0; print; next
+    }
+    skip && /^Include = \/etc\/pacman.d\/mirrorlist$/ { next }
+    { skip=0; print }
+    ' "$MOUNT_DIR/etc/pacman.conf" > "$MOUNT_DIR/etc/pacman.conf.clean" && mv "$MOUNT_DIR/etc/pacman.conf.clean" "$MOUNT_DIR/etc/pacman.conf"
+fi
 
-printf 'Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch\nServer = https://mirrors.edge.kernel.org/archlinux/$repo/os/$arch\nServer = https://geo.mirror.pkgbuild.com/$repo/os/$arch\n' > "$MOUNT_DIR/etc/pacman.d/mirrorlist"
-# Generate /etc/fstab
-if [ ! -f "$MOUNT_DIR/etc/fstab" ] || ! grep -q "$ROOT_PATH" "$MOUNT_DIR/etc/fstab" 2>/dev/null; then
-    ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PATH" 2>/dev/null || true)
-    BOOT_UUID=$(blkid -s UUID -o value "$BOOT_PART" 2>/dev/null || true)
-    EFI_UUID=$(blkid -s UUID -o value "$EFI_PART" 2>/dev/null || true)
-    {
-        [ -n "$ROOT_UUID" ] && echo "UUID=$ROOT_UUID / btrfs subvol=@,compress=zstd:3,noatime,discard=async,space_cache=v2 0 0"
-        [ -n "$BOOT_UUID" ] && echo "UUID=$BOOT_UUID /boot btrfs defaults 0 2"
-        [ -n "$EFI_UUID" ] && echo "UUID=$EFI_UUID /boot/efi vfat defaults 0 2"
-    } > "$MOUNT_DIR/etc/fstab"
-main
+if grep -q "mirror.rackspace.com" "$MOUNT_DIR/etc/pacman.d/mirrorlist" 2>/dev/null; then :; else
+    printf '%s\n' \
+        'Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch' \
+        'Server = https://mirrors.edge.kernel.org/archlinux/$repo/os/$arch' \
+        'Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch' \
+        > "$MOUNT_DIR/etc/pacman.d/mirrorlist"
 fi
 
 log "Installing GRUB..."
 arch-chroot "$MOUNT_DIR" /bin/bash -c '
-kilo/astute-mill-ays
     if [ ! -s /etc/pacman.d/mirrorlist ] || ! grep -q "mirror.rackspace.com" /etc/pacman.d/mirrorlist; then
-        echo "Server = https://mirror.rackspace.com/archlinux/\$repo/os/\$arch" > /etc/pacman.d/mirrorlist
+        printf "%s\n" "Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch" > /etc/pacman.d/mirrorlist
     fi
-    grep -q "^\\[core\\]" /etc/pacman.conf || printf "\n[core]\nInclude = /etc/pacman.d/mirrorlist\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
-
-    grep -q "^\\[core\\]" /etc/pacman.conf || printf "\n[core]\nInclude = /etc/pacman.d/mirrorlist\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
+    grep -q "^\[core\]" /etc/pacman.conf || printf "\n[core]\nInclude = /etc/pacman.d/mirrorlist\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
     pacman-key --init && pacman-key --populate archlinux
-main
     pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
     pacman -S --noconfirm --needed linux linux-firmware lvm2 btrfs-progs mkinitcpio plymouth sddm || exit 1
-    [ -r /boot/vmlinuz-linux ] || { echo "Kernel not readable, reinstalling..."; pacman -S --noconfirm --overwrite \* linux linux-firmware || exit 1; }
+    [ -r /boot/vmlinuz-linux ] || { echo "Kernel not readable, reinstalling..."; pacman -S --noconfirm --overwrite "*" linux linux-firmware || exit 1; }
     [ -r /boot/vmlinuz-linux ] || { echo "CRITICAL: kernel missing or unreadable."; exit 1; }
     sed -i "s/^MODULES=.*/MODULES=(btrfs)/" /etc/mkinitcpio.conf
     sed -i "s/^HOOKS=.*/HOOKS=(base udev autodetect modconf block lvm2 filesystems keyboard)/" /etc/mkinitcpio.conf
@@ -191,11 +172,9 @@ main
     sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"rd.lvm.vg=black_pool rd.lvm.lv=black_pool/black_pool rd.lvm.lv=black_pool/blacklogic\"|" /etc/default/grub
     grep -q "^GRUB_CMDLINE_LINUX=" /etc/default/grub || echo "GRUB_CMDLINE_LINUX=\"rd.lvm.vg=black_pool rd.lvm.lv=black_pool/black_pool rd.lvm.lv=black_pool/blacklogic\"" >> /etc/default/grub
     grub-mkconfig -o /boot/grub/grub.cfg || exit 1
-    # Put BlackArch first in UEFI boot order
     BA=$(efibootmgr 2>/dev/null | grep -i blackarch | head -1 | grep -o "Boot[0-9A-Fa-f]*" | head -1 | sed "s/Boot//")
     ORDER=$(efibootmgr 2>/dev/null | sed -n "s/BootOrder: //p" | tr "," "\n" | grep -v "^$BA$" | paste -sd, -)
     if [ -n "$BA" ]; then efibootmgr -o "$BA${ORDER:+,$ORDER}" 2>/dev/null || true; fi
-    echo "root:blackarch" | chpasswd
 ' || { echo "GRUB install failed."; exit 1; }
 
 if [ ! -f "$MOUNT_DIR/boot/efi/EFI/BlackArch/grubx64.efi" ] && [ ! -f "$MOUNT_DIR/boot/efi/EFI/BOOT/BOOTX64.EFI" ]; then
@@ -215,8 +194,8 @@ if [ -f /usr/local/bin/blacklogic-pool-agent.sh ]; then
     cp /usr/local/bin/blacklogic-pool-agent.sh "$MOUNT_DIR/usr/local/bin/blacklogic-pool-agent.sh" 2>/dev/null || true
     cp /usr/local/bin/blacklogic-ensure-tools.sh "$MOUNT_DIR/usr/local/bin/blacklogic-ensure-tools.sh" 2>/dev/null || true
     chmod +x "$MOUNT_DIR/usr/local/bin/blacklogic-pool-agent.sh" 2>/dev/null || true
-    arch-chroot "$MOUNT_DIR" /bin/bash -c "
-        cat > /etc/systemd/system/blacklogic-pool-agent.service <<EOF
+    arch-chroot "$MOUNT_DIR" /bin/bash -c '
+        cat > /etc/systemd/system/blacklogic-pool-agent.service <<"EOF"
 [Unit]
 Description=BlackLogic Thin Pool Agent
 After=local-fs.target
@@ -225,7 +204,7 @@ After=local-fs.target
 Type=oneshot
 ExecStart=/usr/local/bin/blacklogic-pool-agent.sh
 EOF
-        cat > /etc/systemd/system/blacklogic-pool-agent.timer <<EOF
+        cat > /etc/systemd/system/blacklogic-pool-agent.timer <<"EOF"
 [Unit]
 Description=Run BlackLogic Pool Agent hourly
 
@@ -237,7 +216,7 @@ Persistent=true
 WantedBy=timers.target
 EOF
         systemctl enable blacklogic-pool-agent.timer 2>/dev/null || true
-    "
+    '
 fi
 
 log "Install complete."

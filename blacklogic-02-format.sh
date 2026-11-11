@@ -1,5 +1,6 @@
 #!/bin/bash
 set -Eeuo pipefail
+
 SCRIPT_DIR=""
 for _src in "${ZSH_SOURCE:-}" "${BASH_SOURCE:-}" "${KSH_SOURCE:-}" "$0"; do
     [ -n "$_src" ] && [ -f "$_src" ] && { SCRIPT_DIR="$(cd "$(dirname "$_src")" && pwd)"; break; }
@@ -27,7 +28,6 @@ warn() { echo "WARNING: $*" >&2; }
 log() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG_FILE"; }
 fail() { echo "FATAL: $*" >&2; exit 1; }
 
-# Prevent concurrent execution
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
     echo "Another format instance is running. Exiting."
@@ -182,14 +182,13 @@ while IFS= read -r DEV_NAME; do
     DRIVES+=("$DEV|$CLASS")
 done < <(lsblk -J -b -o NAME,TYPE 2>/dev/null | jq -r '.blockdevices[]? | select(.type=="disk") | select(.name|startswith("zram")|not) | select(.name|startswith("loop")|not) | .name')
 
- kilo/astute-mill-ays
-[ "${#DRIVES[@]}" -eq 0 ] && { 
+if [ "${#DRIVES[@]}" -eq 0 ]; then
     if blkid -s TYPE -o value "/dev/$VG_NAME/blacklogic" 2>/dev/null | grep -q btrfs; then
         echo "No unclaimed drives to format."
         exit 0
     else
         echo "Root LV invalid; recreating..."
-        lvchange -ay "$VG_NAME/blacklogic" 2>/dev/null || true
+        vgchange -ay "$VG_NAME" 2>/dev/null || true
         if lvs "$VG_NAME/blacklogic" &>/dev/null; then lvremove -f "$VG_NAME/blacklogic" 2>/dev/null || true; fi
         if lvcreate -V "$NEW_SIZE" --thinpool "$POOL_NAME" -n "blacklogic" "$VG_NAME" 2>/dev/null; then
             lvchange -ay "$VG_NAME/blacklogic"
@@ -205,17 +204,13 @@ done < <(lsblk -J -b -o NAME,TYPE 2>/dev/null | jq -r '.blockdevices[]? | select
         fi
         exit 0
     fi
-}
-=======
-[ "${#DRIVES[@]}" -eq 0 ] && { if blkid -s TYPE -o value "/dev/$VG_NAME/blacklogic" 2>/dev/null | grep -q btrfs; then echo "No unclaimed drives to format."; exit 0; else echo "Root LV invalid; recreating..."; lvchange -ay "$VG_NAME/blacklogic" 2>/dev/null || true; if lvs "$VG_NAME/blacklogic" &>/dev/null; then lvremove -f "$VG_NAME/blacklogic" 2>/dev/null || true; fi; if lvcreate -V "$NEW_SIZE" --thinpool "$POOL_NAME" -n "blacklogic" "$VG_NAME" 2>/dev/null; then lvchange -ay "$VG_NAME/blacklogic"; mkfs.btrfs -f "/dev/$VG_NAME/blacklogic" && { mkdir -p /tmp/blacklogic-mnt; mount "/dev/$VG_NAME/blacklogic" /tmp/blacklogic-mnt && { btrfs subvolume create /tmp/blacklogic-mnt/@ 2>/dev/null || true; umount /tmp/blacklogic-mnt; }; }; else echo "Thin pool failed; purging VG to rebuild from scratch."; vgchange -an "$VG_NAME" 2>/dev/null || true; for pv in $(pvs --noheadings -o pv_name -S "vg_name=$VG_NAME" 2>/dev/null); do pvremove -ff -y "$pv" 2>/dev/null || true; done; vgremove -f "$VG_NAME" 2>/dev/null || true; fi; exit 0; fi; }
-main
+fi
 
 SUCCESS=0
 for D in "${DRIVES[@]}"; do
     IFS='|' read -r DEV CLASS <<< "$D"
     echo "Formatting unclaimed drive $DEV (class $CLASS)..."
 
-    # Unmount any stale mounts on this device
     for mp in $(lsblk -n -o MOUNTPOINT "$DEV" 2>/dev/null); do
         [ -n "$mp" ] && [ "$mp" != "/" ] && umount -l "$mp" 2>/dev/null || true
     done
@@ -226,6 +221,7 @@ for D in "${DRIVES[@]}"; do
 
     fuser -k -9 "$DEV" 2>/dev/null || true
     for p in $(lsblk -n -o NAME "$DEV" 2>/dev/null); do fuser -k -9 "/dev/$p" 2>/dev/null || true; done
+
     for vg in black_pool black_surgery surgery_vg; do
         if vgs "$vg" &>/dev/null; then
             for pv in $(pvs --noheadings -o pv_name -S "vg_name=$vg" 2>/dev/null); do
@@ -237,15 +233,9 @@ for D in "${DRIVES[@]}"; do
             done
         fi
     done
+
     for p in $(lsblk -n -o NAME "$DEV" 2>/dev/null); do dmsetup remove "/dev/$p" 2>/dev/null || true; done
-    for vg in black_pool black_surgery surgery_vg; do
-        if vgs "$vg" &>/dev/null; then
-            for pv in $(pvs --noheadings -o pv_name -S "vg_name=$vg" 2>/dev/null); do
-                [ -z "$pv" ] && continue
-                [[ "$pv" == "$DEV"* ]] && { vgchange -an "$vg" 2>/dev/null || true; vgremove -f "$vg" 2>/dev/null || true; break; }
-            done
-        fi
-    done
+
     pvremove -ff -y "$DEV" 2>/dev/null || true
     for p in $(lsblk -n -o NAME "$DEV" 2>/dev/null); do pvremove -ff -y "/dev/$p" 2>/dev/null || true; done
     clear_foreign_signatures "$DEV"
@@ -272,6 +262,7 @@ for D in "${DRIVES[@]}"; do
         parted -s "$DEV" unit MiB mkpart black_EFI 1025MiB 1537MiB >/dev/null 2>&1 || { echo "Failed creating EFI partition on $DEV"; continue; }
         parted -s "$DEV" set 2 esp on 2>/dev/null || true
         parted -s "$DEV" unit MiB mkpart black_surgery 1537MiB 5121MiB >/dev/null 2>&1 || { echo "Failed creating surgery partition on $DEV"; continue; }
+
         HAS_SWAP=$(lsblk -n -o LABEL "$DEV" 2>/dev/null | grep -c "BLACK-SWAP" || true)
         if [ "$CLASS" -eq 100 ] && [ "$HAS_SWAP" -eq 0 ]; then
             parted -s "$DEV" unit MiB mkpart black_swap 5121MiB 13313MiB >/dev/null 2>&1 || { echo "Failed creating swap partition on $DEV"; continue; }
@@ -282,6 +273,7 @@ for D in "${DRIVES[@]}"; do
             parted -s "$DEV" unit MiB mkpart black_pool 5121MiB "$((5121 + STARTING_POOL_GIB * 1024))MiB" >/dev/null 2>&1 || { echo "Failed creating pool partition on $DEV"; continue; }
             LVM_PART="${DEV}${PS}4"
         fi
+
         if ! mkfs.btrfs -L black_boot -f "${DEV}${PS}1" >/dev/null 2>&1; then
             echo "Failed to format boot partition on $DEV"
             continue
@@ -319,14 +311,11 @@ for D in "${DRIVES[@]}"; do
     fi
     [ "$pv_ok" -eq 0 ] && { echo "pvcreate failed on $LVM_PART"; continue; }
 
-    # Label PV as black_driveN (lowest unassigned number starting at 0)
     DRIVE_NUM=0
-    while pvs --noheadings -o pv_tags 2>/dev/null | tr ',' '
-' | grep -qx "black_drive${DRIVE_NUM}"; do
+    while pvs --noheadings -o pv_tags 2>/dev/null | tr ',' '\n' | grep -qx "black_drive${DRIVE_NUM}"; do
         DRIVE_NUM=$((DRIVE_NUM + 1))
     done
     pvchange --addtag "black_drive${DRIVE_NUM}" "$LVM_PART" 2>/dev/null || true
-
     pvresize "$LVM_PART" 2>/dev/null || true
 
     if vgs "$VG_NAME" &>/dev/null; then
@@ -341,7 +330,6 @@ for D in "${DRIVES[@]}"; do
         lvcreate --type thin-pool -l 50%VG -c "$CHUNK_SIZE" -n "$POOL_NAME" "$VG_NAME" 2>/dev/null || { echo "lvcreate thin-pool failed"; continue; }
     fi
 
-    NEXT=$(lvs --noheadings -o lv_name "$VG_NAME" 2>/dev/null | grep -c "black_drive" || true)
     lvchange -ay "$VG_NAME/blacklogic" 2>/dev/null || true
     if ! lvs "$VG_NAME/blacklogic" &>/dev/null || ! blkid -s TYPE -o value "/dev/$VG_NAME/blacklogic" 2>/dev/null | grep -q btrfs; then
         if lvs "$VG_NAME/blacklogic" &>/dev/null; then lvremove -f "$VG_NAME/blacklogic" 2>/dev/null || true; fi
@@ -352,13 +340,11 @@ for D in "${DRIVES[@]}"; do
         lvchange -ay "$VG_NAME/blacklogic" 2>/dev/null || true
     fi
 
- kilo/astute-mill-ays
     if ! mkfs.btrfs -f "/dev/$VG_NAME/blacklogic"; then
         echo "mkfs.btrfs failed on $DEV"
         continue
     fi
-    mkfs.btrfs -f "/dev/$VG_NAME/blacklogic" || { echo "mkfs.btrfs failed"; continue; }
-main
+
     mkdir -p /tmp/blacklogic-mnt 2>/dev/null || true
     if ! mount "/dev/$VG_NAME/blacklogic" /tmp/blacklogic-mnt; then
         echo "Failed to mount root LV on $DEV"
@@ -366,12 +352,12 @@ main
     fi
     btrfs subvolume create /tmp/blacklogic-mnt/@ 2>/dev/null || true
     umount /tmp/blacklogic-mnt 2>/dev/null || true
-    # Create blacksurgery LV in black_surgery VG
+
     if vgs black_surgery &>/dev/null && ! lvs black_surgery/blacksurgery &>/dev/null; then
         lvcreate -L 4G -n blacksurgery black_surgery 2>/dev/null || true
         mkfs.btrfs -f "/dev/black_surgery/blacksurgery" >/dev/null 2>&1 || true
     fi
-    # Save boot and EFI partition paths for install stage (first drive with these partitions)
+
     if [ "$CLASS" -ne 10 ] && [ -z "${EFI_PART_SAVED:-}" ]; then
         EFI_PART="${DEV}${PS}2"
         BOOT_PART="${DEV}${PS}1"
@@ -379,6 +365,7 @@ main
         echo "BOOT_PART=$BOOT_PART" >> "$STATE_FILE"
         EFI_PART_SAVED=1
     fi
+
     record_drive_done "$DEV"
     echo "  $DEV -> blacklogic (pool partition: ${STARTING_POOL_GIB}GiB starting allocation)"
     SUCCESS=1
