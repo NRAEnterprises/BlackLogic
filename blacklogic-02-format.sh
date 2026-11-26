@@ -228,7 +228,21 @@ echo "=== Stage 2: Drive Formatting ==="
 LIVE_PART=$(findmnt -n -o SOURCE / 2>/dev/null | sed 's/\[.*//' || true)
 LIVE_DRIVE=""
 if [ -n "${LIVE_PART:-}" ]; then
-    LIVE_DRIVE=$(lsblk -no PKNAME "$LIVE_PART" 2>/dev/null | head -n1 || true)
+    # If it's an LVM LV, trace to physical disk
+    if [[ "$LIVE_PART" == /dev/mapper/* ]] || [[ "$LIVE_PART" == /dev/*vg* ]] || [[ "$LIVE_PART" == /dev/*vg-* ]]; then
+        # Get PVs backing this LV
+        LIVE_DRIVE=$(lsblk -no PKNAME "$LIVE_PART" 2>/dev/null | head -n1 || true)
+        if [ -z "${LIVE_DRIVE:-}" ]; then
+            # Try lvs to find PV
+            LV_NAME=$(basename "$LIVE_PART")
+            VG_NAME_LV=$(lvs --noheadings -o vg_name "$LIVE_PART" 2>/dev/null | tr -d ' ' || true)
+            if [ -n "$VG_NAME_LV" ]; then
+                LIVE_DRIVE=$(pvs --noheadings -o pv_name -S "vg_name=$VG_NAME_LV" 2>/dev/null | head -n1 | sed 's|/dev/||;s/[0-9]*$//;s/p$//' || true)
+            fi
+        fi
+    else
+        LIVE_DRIVE=$(lsblk -no PKNAME "$LIVE_PART" 2>/dev/null | head -n1 || true)
+    fi
     [ -n "${LIVE_DRIVE:-}" ] || LIVE_DRIVE=$(basename "$LIVE_PART" 2>/dev/null | sed 's/[0-9]*$//' || true)
     [[ "$LIVE_DRIVE" == *p ]] && LIVE_DRIVE="${LIVE_DRIVE%p}"
 fi
@@ -253,7 +267,7 @@ if vgs "$VG_NAME" &>/dev/null; then
         while IFS= read -r DEV_NAME; do
             [ -z "$DEV_NAME" ] && continue
             [[ "$DEV_NAME" == "$LIVE_DRIVE" ]] && continue
-            local DEV="/dev/$DEV_NAME"
+            DEV="/dev/$DEV_NAME"
             lsblk -n -o MOUNTPOINT "$DEV" 2>/dev/null | grep -q "/" && continue
 
             IN_VG=0
