@@ -1,115 +1,197 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-# --- Variables ---
-DRIVE1="/dev/sdb"
-DRIVE2="/dev/sdc"
+# BlackLogic Standalone Builder
+# Use this script if you already have drives partitioned and just want to set them up
+# It will discover existing partitions and set up the LVM/Btrfs structure
+
+SCRIPT_DIR=""
+for _src in "${ZSH_SOURCE:-}" "${BASH_SOURCE:-}" "${KSH_SOURCE:-}" "$0"; do
+    [ -n "$_src" ] && [ -f "$_src" ] && { SCRIPT_DIR="$(cd "$(dirname "$_src")" && pwd)"; break; }
+done
+[ -z "$SCRIPT_DIR" ] && SCRIPT_DIR="$(pwd)"
+[ -f "$SCRIPT_DIR/blacklogic-ensure-tools.sh" ] && . "$SCRIPT_DIR/blacklogic-ensure-tools.sh"
+require_root
+ensure_tools parted wipefs pvcreate vgcreate vgextend lvcreate lvextend mkfs.fat mkfs.btrfs partprobe blkid lsblk lvs vgs pvs mount umount findmnt 2>/dev/null || true
+
 MOUNT_DIR="/mnt/blackarch"
-NEW_SIZE="15.00PiB"
+NEW_SIZE="${SURGERY_SIZE:-64GiB}"
 CHUNK_SIZE="1G"
+STATE_FILE="/tmp/blacklogic-state"
+LOG_FILE="/var/log/blacklogic-build.log"
+
+log() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG_FILE"; }
+warn() { echo "[$(date +%H:%M:%S)] WARNING: $*" >&2; }
+fail() { echo "[$(date +%H:%M:%S)] FATAL: $*" >&2; exit 1; }
 
 cleanup() {
     local exit_code=$?
-    echo "ERROR: Command failed. Exiting." >&2
+    echo "ERROR: Command failed with exit code $exit_code" >&2
     umount -R "$MOUNT_DIR" 2>/dev/null || true
     swapoff -a 2>/dev/null || true
     exit $exit_code
 }
 trap cleanup ERR
 
-echo "=== 1. Wiping and Partitioning Drives ==="
-wipefs -a "$DRIVE1"
-wipefs -a "$DRIVE2"
+# Discover existing partitions
+echo "=== Discovering existing partitions ==="
 
-# Drive 1: EFI, Boot, Swap, Surgery VG, Main VG (PV)
-parted -s "$DRIVE1" mklabel gpt
-parted -s "$DRIVE1" mkpart primary fat32 1MiB 513MiB
-parted -s "$DRIVE1" set 1 esp on
-parted -s "$DRIVE1" mkpart primary btrfs 513MiB 1537MiB
-parted -s "$DRIVE1" mkpart primary linux-swap 1537MiB 9729MiB
-parted -s "$DRIVE1" mkpart primary 9729MiB 13825MiB # Surgery (4GB)
-parted -s "$DRIVE1" mkpart primary 13825MiB 100%   # Main PV
+declare -a EFI_PARTS=()
+declare -a BOOT_PARTS=()
+declare -a PV_PARTS=()
+declare -a SWAP_PARTS=()
 
-# Drive 2: Entirely dedicated to the Main PV, named black_ext1
-parted -s "$DRIVE2" mklabel gpt
-parted -s "$DRIVE2" mkpart black_ext1 1MiB 100%
+while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    DEV=$(echo "$line" | awk '{print $1}')
+    LABEL=$(echo "$line" | awk '{print $2}')
+    FSTYPE=$(echo "$line" | awk '{print $3}')
 
-sleep 2
-partprobe "$DRIVE1"
-partprobe "$DRIVE2"
-udevadm settle
+    case "$LABEL" in
+        BLACK-EFI|black_EFI) EFI_PARTS+=("$DEV") ;;
+        black_boot) BOOT_PARTS+=("$DEV") ;;
+        black_swap) SWAP_PARTS+=("$DEV") ;;
+        *) 
+            if [ "$FSTYPE" = "LVM2_member" ] || [ "$FSTYPE" = "linux" ]; then
+                PV_PARTS+=("$DEV")
+            fi
+            ;;
+    esac
+done < <(blkid -o export 2>/dev/null | awk -F= '/DEVNAME=/{dev=$2} /LABEL=/{label=$2} /TYPE=/{type=$2} /^$/{if(dev) print dev,label,type; dev="";label="";type=""}')
 
-echo "=== 2. Formatting Filesystems ==="
-mkfs.fat -F32 "${DRIVE1}1"
-mkfs.btrfs -f "${DRIVE1}2"
-mkswap "${DRIVE1}3"
-mkfs.btrfs -f "${DRIVE1}4"
+echo "Found EFI partitions: ${EFI_PARTS[*]:-none}"
+echo "Found BOOT partitions: ${BOOT_PARTS[*]:-none}"
+echo "Found PV partitions: ${PV_PARTS[*]:-none}"
+echo "Found SWAP partitions: ${SWAP_PARTS[*]:-none}"
 
-echo "=== 3. Setting up LVM ==="
-pvcreate -f "${DRIVE1}4" "${DRIVE1}5" "${DRIVE2}1"
-vgcreate surgery_vg "${DRIVE1}4"
-vgcreate black_pool "${DRIVE1}5" "${DRIVE2}1"
+# Use first EFI and BOOT if found
+EFI_PART="${EFI_PARTS[0]:-}"
+BOOT_PART="${BOOT_PARTS[0]:-}"
 
-lvcreate -l 100%FREE -n surgery_root surgery_vg
-mkfs.btrfs -f /dev/surgery_vg/surgery_root
+if [ -z "$EFI_PART" ] || [ -z "$BOOT_PART" ]; then
+    echo "ERROR: Could not find EFI or BOOT partition"
+    echo "Please create partitions with labels: black_EFI and black_boot"
+    exit 1
+fi
 
-# Main Pool (10% of VG, max chunk size)
-lvcreate --type thin-pool -l 10%VG -c "$CHUNK_SIZE" -n black_pool black_pool
-lvcreate -V "$NEW_SIZE" --thinpool black_pool -n blacklogic black_pool
+# Discover PVs already in use
+declare -a USED_PVS=()
+while IFS= read -r PV; do
+    [ -z "$PV" ] && continue
+    PV_VG=$(pvs --noheadings -o vg_name "$PV" 2>/dev/null | tr -d ' ')
+    USED_PVS+=("$PV")
+done < <(pvs --noheadings -o pv_name 2>/dev/null)
 
-echo "=== 4. Formatting and Mounting BlackArch Root ==="
-mkfs.btrfs -f /dev/black_pool/blacklogic
-mount /dev/black_pool/blacklogic "$MOUNT_DIR"
-btrfs subvolume create "${MOUNT_DIR}/@"
-umount "$MOUNT_DIR"
+echo "Found PVs already in use: ${USED_PVS[*]:-none}"
 
-mount -o compress=zstd:3,subvol=@,noatime,discard=async,space_cache=v2 /dev/black_pool/blacklogic "$MOUNT_DIR"
+# Build list of available PV partitions
+declare -a AVAILABLE_PVS=()
+for PV in "${PV_PARTS[@]}"; do
+    USED=0
+    for UP in "${USED_PVS[@]}"; do
+        [ "$PV" = "$UP" ] && USED=1 && break
+    done
+    [ "$USED" -eq 0 ] && AVAILABLE_PVS+=("$PV")
+done
+
+if [ "${#AVAILABLE_PVS[@]}" -eq 0 ]; then
+    echo "No available PV partitions found."
+    echo "Please create LVM partitions with type=linux (LVM)"
+    exit 1
+fi
+
+echo "Available PV partitions: ${AVAILABLE_PVS[*]}"
+
+# Activate LVM
+echo "=== Activating LVM ==="
+vgscan --mknodes >/dev/null 2>&1 || true
+vgchange -ay >/dev/null 2>&1 || true
+udevadm settle >/dev/null 2>&1 || true
+sleep 1
+
+# Create black_pool VG
+VG_NAME="black_pool"
+if vgs "$VG_NAME" &>/dev/null; then
+    echo "VG $VG_NAME already exists."
+else
+    echo "Creating VG $VG_NAME..."
+    vgcreate "$VG_NAME" "${AVAILABLE_PVS[@]}" || fail "vgcreate failed"
+fi
+
+# Create thin pool
+POOL_NAME="black_pool"
+if ! lvs "$VG_NAME/$POOL_NAME" &>/dev/null; then
+    echo "Creating thin pool..."
+    lvcreate --type thin-pool -l 50%VG -c "$CHUNK_SIZE" -n "$POOL_NAME" "$VG_NAME" || fail "lvcreate thin-pool failed"
+fi
+
+# Create root LV
+POOL_VOL_NAME="blacklogic"
+if ! lvs "$VG_NAME/$POOL_VOL_NAME" &>/dev/null; then
+    echo "Creating root LV..."
+    lvcreate -V "$NEW_SIZE" --thinpool "$POOL_NAME" -n "$POOL_VOL_NAME" "$VG_NAME" || fail "lvcreate root LV failed"
+    lvchange -ay "$VG_NAME/$POOL_VOL_NAME" 2>/dev/null || true
+    mkfs.btrfs -f "/dev/$VG_NAME/$POOL_VOL_NAME" || fail "mkfs.btrfs failed"
+fi
+
+# Create surgery VG
+SURGERY_VG="black_surgery"
+if ! vgs "$SURGERY_VG" &>/dev/null; then
+    # Look for surgery partitions
+    declare -a SURGERY_PARTS=()
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        DEV=$(echo "$line" | awk '{print $1}')
+        LABEL=$(echo "$line" | awk '{print $2}')
+        [ "$LABEL" = "black_surgery" ] && SURGERY_PARTS+=("$DEV")
+    done < <(blkid -o export 2>/dev/null | awk -F= '/DEVNAME=/{dev=$2} /LABEL=/{label=$2} /^$/{if(dev) print dev,label; dev="";label=""}')
+
+    if [ "${#SURGERY_PARTS[@]}" -gt 0 ]; then
+        echo "Creating surgery VG..."
+        pvcreate -ff -y "${SURGERY_PARTS[@]}" 2>/dev/null || true
+        vgcreate "$SURGERY_VG" "${SURGERY_PARTS[@]}" 2>/dev/null || true
+        lvcreate -L 4G -n blacksurgery "$SURGERY_VG" 2>/dev/null || true
+        mkfs.btrfs -f "/dev/$SURGERY_VG/blacksurgery" >/dev/null 2>&1 || true
+    fi
+fi
+
+# Mount and setup
+echo "=== Mounting and configuring ==="
+mkdir -p "$MOUNT_DIR"
+mount -o subvol=@,compress=zstd:3,noatime,discard=async,space_cache=v2 "/dev/$VG_NAME/$POOL_VOL_NAME" "$MOUNT_DIR" || { echo "Failed to mount root"; exit 1; }
+
 mkdir -p "${MOUNT_DIR}/boot" "${MOUNT_DIR}/boot/efi"
-mount "${DRIVE1}2" "${MOUNT_DIR}/boot"
-mount "${DRIVE1}1" "${MOUNT_DIR}/boot/efi"
-swapon "${DRIVE1}3"
+mount "$BOOT_PART" "${MOUNT_DIR}/boot" || { echo "Failed to mount boot"; exit 1; }
+mount "$EFI_PART" "${MOUNT_DIR}/boot/efi" || { echo "Failed to mount EFI"; exit 1; }
 
-echo "=== 5. Installing Base System (Pacstrap) ==="
-sed -i '/\[community\]/,/Include =/ s/^/#/' /etc/pacman.conf
+# Generate fstab
+ROOT_UUID=$(blkid -s UUID -o value "/dev/$VG_NAME/$POOL_VOL_NAME" 2>/dev/null || true)
+BOOT_UUID=$(blkid -s UUID -o value "$BOOT_PART" 2>/dev/null || true)
+EFI_UUID=$(blkid -s UUID -o value "$EFI_PART" 2>/dev/null || true)
 
-pacstrap -K "$MOUNT_DIR" base base-devel linux linux-firmware lvm2 btrfs-progs grub efibootmgr networkmanager vim sudo
+cat > "${MOUNT_DIR}/etc/fstab" <<FSTAB
+# /etc/fstab: static file system information
+# Generated by BlackLogic Standalone Builder
 
-echo "=== 6. Configuring the System (Chroot) ==="
-genfstab -U "$MOUNT_DIR" >> "${MOUNT_DIR}/etc/fstab"
+# Root filesystem (Btrfs on LVM thin pool)
+UUID=$ROOT_UUID  /  btrfs  rw,relatime,compress=zstd:3,space_cache=v2,subvol=@  0  0
+FSTAB
 
-cat << CHROOT_EOF | arch-chroot "$MOUNT_DIR"
-echo "blackarch" > /etc/hostname
+[ -n "$BOOT_UUID" ] && echo "UUID=$BOOT_UUID  /boot  btrfs  rw,relatime  0  2" >> "${MOUNT_DIR}/etc/fstab"
+[ -n "$EFI_UUID" ] && echo "UUID=$EFI_UUID  /boot/efi  vfat  rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro  0  1" >> "${MOUNT_DIR}/etc/fstab"
 
-ln -sf /usr/share/zoneinfo/UTC /etc/localtime
-hwclock --systohc
-echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
-locale-gen
-echo "LANG=en_US.UTF-8" > /etc/locale.conf
+# Bind mounts
+for d in dev proc sys run; do
+    mkdir -p "${MOUNT_DIR}/$d"
+    mount --bind "/$d" "${MOUNT_DIR}/$d"
+done
 
-systemctl enable NetworkManager
+echo "=== Running install script ==="
+"$SCRIPT_DIR/blacklogic-03-install.sh"
 
-cat << LVM_EOF >> /etc/lvm/lvm.conf
-activation {
-    thin_pool_autoextend_threshold = 70
-    thin_pool_autoextend_percent = 20
-}
-LVM_EOF
+echo "=== Unmounting ==="
+umount -R "$MOUNT_DIR" 2>/dev/null || true
+swapoff -a 2>/dev/null || true
 
-sed -i 's/block filesystems/block lvm2 filesystems/' /etc/mkinitcpio.conf
-mkinitcpio -P
-
-grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=BlackArch --removable --recheck
-grub-mkconfig -o /boot/grub/grub.cfg
-
-echo "root:blackarch" | chpasswd
-
-curl -O https://blackarch.org/strap.sh
-chmod +x strap.sh
-./strap.sh
-CHROOT_EOF
-
-echo "=== 7. Unmounting and Finishing ==="
-umount -R "$MOUNT_DIR"
-swapoff -a
-
-echo "SUCCESS: The system is fully built. You can now reboot."
+echo "SUCCESS: BlackLogic build complete."
+exit 0

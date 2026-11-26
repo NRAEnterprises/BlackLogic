@@ -20,6 +20,7 @@ STARTING_POOL_GIB="64"
 LOCK_FILE="/tmp/blacklogic-format.lock"
 MAX_PART_WAIT="60"
 EFI_PART_SAVED=0
+FIRMWARE_DETECTED=0
 
 mkdir -p /tmp
 : > "$PROGRESS_FILE"
@@ -85,6 +86,138 @@ disk_healthy() {
     return 0
 }
 
+detect_firmware() {
+    log "Detecting firmware requirements..."
+
+    # CPU microcode
+    if [ -f /proc/cpuinfo ]; then
+        if grep -q "GenuineIntel" /proc/cpuinfo; then
+            echo "intel-ucode" >> "$STATE_FILE.firmware"
+            FIRMWARE_DETECTED=1
+        elif grep -q "AuthenticAMD" /proc/cpuinfo; then
+            echo "amd-ucode" >> "$STATE_FILE.firmware"
+            FIRMWARE_DETECTED=1
+        fi
+    fi
+
+    # GPU detection
+    if command -v lspci >/dev/null 2>&1; then
+        if lspci | grep -qi "NVIDIA"; then
+            echo "nvidia" >> "$STATE_FILE.firmware"
+            echo "nvidia-utils" >> "$STATE_FILE.firmware"
+            FIRMWARE_DETECTED=1
+        fi
+        if lspci | grep -qi "AMD/ATI\|Advanced Micro Devices.*VGA"; then
+            echo "xf86-video-amdgpu" >> "$STATE_FILE.firmware"
+            echo "mesa" >> "$STATE_FILE.firmware"
+            echo "vulkan-radeon" >> "$STATE_FILE.firmware"
+            FIRMWARE_DETECTED=1
+        fi
+        if lspci | grep -qi "Intel.*Graphics"; then
+            echo "xf86-video-intel" >> "$STATE_FILE.firmware"
+            echo "mesa" >> "$STATE_FILE.firmware"
+            echo "vulkan-intel" >> "$STATE_FILE.firmware"
+            FIRMWARE_DETECTED=1
+        fi
+    fi
+
+    # Wireless firmware
+    if command -v lspci >/dev/null 2>&1; then
+        lspci | grep -qi "Intel.*Wireless\|iwlwifi" && echo "iwlwifi" >> "$STATE_FILE.firmware"
+        lspci | grep -qi "Realtek.*Wireless" && echo "rtl8xxxu" >> "$STATE_FILE.firmware"
+        lspci | grep -qi "Atheros.*Wireless" && echo "ath10k" >> "$STATE_FILE.firmware"
+    fi
+
+    # If nothing detected, fall back to bulk
+    if [ "$FIRMWARE_DETECTED" -eq 0 ]; then
+        echo "linux-firmware" >> "$STATE_FILE.firmware"
+    fi
+
+    # Always include base firmware
+    grep -qx "linux-firmware" "$STATE_FILE.firmware" 2>/dev/null || echo "linux-firmware" >> "$STATE_FILE.firmware"
+
+    # Remove duplicates
+    if [ -f "$STATE_FILE.firmware" ]; then
+        sort -u "$STATE_FILE.firmware" -o "$STATE_FILE.firmware"
+        log "Firmware packages detected:"
+        cat "$STATE_FILE.firmware" | sed 's/^/  /'
+    fi
+}
+
+# Interactive drive selection
+select_drives_to_format() {
+    local -a ALL_DRIVES=()
+    local -a EMPTY_DRIVES=()
+    local -a DATA_DRIVES=()
+    local -a SELECTED=()
+
+    # Gather all eligible drives
+    while IFS= read -r DEV_NAME; do
+        [ -z "$DEV_NAME" ] && continue
+        [[ "$DEV_NAME" == "$LIVE_DRIVE" ]] && continue
+        local DEV="/dev/$DEV_NAME"
+        local SIZE=$(blockdev --getsize64 "$DEV" 2>/dev/null || echo 0)
+        [ "$SIZE" -lt 1000000000 ] && continue
+
+        # Check if drive has data
+        local HAS_DATA=0
+        if blkid -s TYPE "$DEV" &>/dev/null || lsblk -n -o FSTYPE "$DEV" 2>/dev/null | grep -q .; then
+            HAS_DATA=1
+        elif lsblk -n -o LABEL "$DEV" 2>/dev/null | grep -q .; then
+            HAS_DATA=1
+        elif lsblk -n -o PARTLABEL "$DEV" 2>/dev/null | grep -q .; then
+            HAS_DATA=1
+        fi
+
+        local SIZE_HR=$(lsblk -bdno SIZE "$DEV" 2>/dev/null | numfmt --to=iec 2>/dev/null || echo "${SIZE}B")
+
+        if [ "$HAS_DATA" -eq 1 ]; then
+            DATA_DRIVES+=("$DEV_NAME|$SIZE_HR|has data")
+        else
+            EMPTY_DRIVES+=("$DEV_NAME|$SIZE_HR|empty")
+        fi
+    done < <(lsblk -J -b -o NAME,TYPE 2>/dev/null | jq -r '.blockdevices[]? | select(.type=="disk") | select(.name|startswith("zram")|not) | select(.name|startswith("loop")|not) | .name')
+
+    # Auto-add empty drives to selection
+    for entry in "${EMPTY_DRIVES[@]}"; do
+        SELECTED+=("$entry")
+    done
+
+    # If there are data drives, ask about them
+    if [ "${#DATA_DRIVES[@]}" -gt 0 ]; then
+        echo "=== Drive Selection ==="
+        echo "The following drives have data:"
+        echo ""
+        local i=1
+        for entry in "${DATA_DRIVES[@]}"; do
+            IFS='|' read -r DEV_NAME SIZE_HR STATUS <<< "$entry"
+            echo "  $i) /dev/$DEV_NAME ($SIZE_HR) - $STATUS"
+            i=$((i + 1))
+        done
+        echo ""
+        echo "Enter the numbers of drives to format (space-separated, or 'none' to skip):"
+        read -r -a INPUT_SEL < /dev/tty
+
+        for sel in "${INPUT_SEL[@]}"; do
+            if [ "$sel" = "none" ]; then
+                break
+            fi
+            if [[ "$sel" =~ ^[0-9]+$ ]] && [ "$sel" -ge 1 ] && [ "$sel" -le "${#DATA_DRIVES[@]}" ]; then
+                SELECTED+=("${DATA_DRIVES[$((sel-1))]}")
+            fi
+        done
+    fi
+
+    # If no drives selected, exit
+    if [ "${#SELECTED[@]}" -eq 0 ]; then
+        echo "No drives selected for formatting."
+        exit 0
+    fi
+
+    # Save selection
+    printf '%s\n' "${SELECTED[@]}" > /tmp/blacklogic-selected-drives
+}
+
 echo "=== Stage 2: Drive Formatting ==="
 [ -f "$STATE_FILE" ] && . "$STATE_FILE"
 
@@ -101,6 +234,9 @@ else
     echo "Live OS: unknown"
 fi
 
+# Detect firmware
+detect_firmware
+
 if vgs "$VG_NAME" &>/dev/null; then
     vgchange -ay "$VG_NAME" &>/dev/null || true
     sleep 1
@@ -113,7 +249,7 @@ if vgs "$VG_NAME" &>/dev/null; then
         while IFS= read -r DEV_NAME; do
             [ -z "$DEV_NAME" ] && continue
             [[ "$DEV_NAME" == "$LIVE_DRIVE" ]] && continue
-            DEV="/dev/$DEV_NAME"
+            local DEV="/dev/$DEV_NAME"
             lsblk -n -o MOUNTPOINT "$DEV" 2>/dev/null | grep -q "/" && continue
 
             IN_VG=0
@@ -143,10 +279,13 @@ if vgs "$VG_NAME" &>/dev/null; then
     fi
 fi
 
+# Select drives to format
+select_drives_to_format
+
 declare -a DRIVES=()
-while IFS= read -r DEV_NAME; do
-    [ -z "$DEV_NAME" ] && continue
-    [[ "$DEV_NAME" == "$LIVE_DRIVE" ]] && continue
+while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    IFS='|' read -r DEV_NAME SIZE_HR STATUS <<< "$line"
     DEV="/dev/$DEV_NAME"
 
     if is_drive_done "$DEV"; then
@@ -180,10 +319,9 @@ while IFS= read -r DEV_NAME; do
         CLASS=10
     fi
     DRIVES+=("$DEV|$CLASS")
-done < <(lsblk -J -b -o NAME,TYPE 2>/dev/null | jq -r '.blockdevices[]? | select(.type=="disk") | select(.name|startswith("zram")|not) | select(.name|startswith("loop")|not) | .name')
+done < /tmp/blacklogic-selected-drives
 
- kilo/astute-mill-ays
-[ "${#DRIVES[@]}" -eq 0 ] && { 
+[ "${#DRIVES[@]}" -eq 0 ] && {
     if blkid -s TYPE -o value "/dev/$VG_NAME/blacklogic" 2>/dev/null | grep -q btrfs; then
         echo "No unclaimed drives to format."
         exit 0
@@ -206,9 +344,6 @@ done < <(lsblk -J -b -o NAME,TYPE 2>/dev/null | jq -r '.blockdevices[]? | select
         exit 0
     fi
 }
-=======
-[ "${#DRIVES[@]}" -eq 0 ] && { if blkid -s TYPE -o value "/dev/$VG_NAME/blacklogic" 2>/dev/null | grep -q btrfs; then echo "No unclaimed drives to format."; exit 0; else echo "Root LV invalid; recreating..."; lvchange -ay "$VG_NAME/blacklogic" 2>/dev/null || true; if lvs "$VG_NAME/blacklogic" &>/dev/null; then lvremove -f "$VG_NAME/blacklogic" 2>/dev/null || true; fi; if lvcreate -V "$NEW_SIZE" --thinpool "$POOL_NAME" -n "blacklogic" "$VG_NAME" 2>/dev/null; then lvchange -ay "$VG_NAME/blacklogic"; mkfs.btrfs -f "/dev/$VG_NAME/blacklogic" && { mkdir -p /tmp/blacklogic-mnt; mount "/dev/$VG_NAME/blacklogic" /tmp/blacklogic-mnt && { btrfs subvolume create /tmp/blacklogic-mnt/@ 2>/dev/null || true; umount /tmp/blacklogic-mnt; }; }; else echo "Thin pool failed; purging VG to rebuild from scratch."; vgchange -an "$VG_NAME" 2>/dev/null || true; for pv in $(pvs --noheadings -o pv_name -S "vg_name=$VG_NAME" 2>/dev/null); do pvremove -ff -y "$pv" 2>/dev/null || true; done; vgremove -f "$VG_NAME" 2>/dev/null || true; fi; exit 0; fi; }
-main
 
 SUCCESS=0
 for D in "${DRIVES[@]}"; do
@@ -341,7 +476,6 @@ for D in "${DRIVES[@]}"; do
         lvcreate --type thin-pool -l 50%VG -c "$CHUNK_SIZE" -n "$POOL_NAME" "$VG_NAME" 2>/dev/null || { echo "lvcreate thin-pool failed"; continue; }
     fi
 
-    NEXT=$(lvs --noheadings -o lv_name "$VG_NAME" 2>/dev/null | grep -c "black_drive" || true)
     lvchange -ay "$VG_NAME/blacklogic" 2>/dev/null || true
     if ! lvs "$VG_NAME/blacklogic" &>/dev/null || ! blkid -s TYPE -o value "/dev/$VG_NAME/blacklogic" 2>/dev/null | grep -q btrfs; then
         if lvs "$VG_NAME/blacklogic" &>/dev/null; then lvremove -f "$VG_NAME/blacklogic" 2>/dev/null || true; fi
@@ -352,13 +486,10 @@ for D in "${DRIVES[@]}"; do
         lvchange -ay "$VG_NAME/blacklogic" 2>/dev/null || true
     fi
 
- kilo/astute-mill-ays
     if ! mkfs.btrfs -f "/dev/$VG_NAME/blacklogic"; then
         echo "mkfs.btrfs failed on $DEV"
         continue
     fi
-    mkfs.btrfs -f "/dev/$VG_NAME/blacklogic" || { echo "mkfs.btrfs failed"; continue; }
-main
     mkdir -p /tmp/blacklogic-mnt 2>/dev/null || true
     if ! mount "/dev/$VG_NAME/blacklogic" /tmp/blacklogic-mnt; then
         echo "Failed to mount root LV on $DEV"
