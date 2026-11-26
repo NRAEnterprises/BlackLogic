@@ -145,8 +145,12 @@ echo "HOSTNAME=$HOSTNAME" >> "$STATE_FILE"
 echo "USERNAME=$USERNAME" >> "$STATE_FILE"
 echo "TIMEZONE=$TIMEZONE" >> "$STATE_FILE"
 echo "DM_PACKAGE=$DM_PACKAGE" >> "$STATE_FILE"
-echo "DE_PACKAGE=$DE_PACKAGE" >> "$STATE_FILE"
+echo "DE_PACKAGE=\"$DE_PACKAGE\"" >> "$STATE_FILE"
 echo "SETUP_SSH=$SETUP_SSH" >> "$STATE_FILE"
+
+# Pre-configure mirrorlist on host side (will be copied to chroot)
+mkdir -p "$MOUNT_DIR/etc/pacman.d"
+printf 'Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch\nServer = https://mirrors.edge.kernel.org/archlinux/$repo/os/$arch\nServer = https://geo.mirror.pkgbuild.com/$repo/os/$arch\n' > "$MOUNT_DIR/etc/pacman.d/mirrorlist"
 
 if [ ! -f "$MOUNT_DIR/etc/os-release" ]; then
     log "Initializing pacman..."
@@ -311,11 +315,14 @@ if grep -q "mirror.rackspace.com" "$MOUNT_DIR/etc/pacman.d/mirrorlist" 2>/dev/nu
 fi
 
 log "Installing GRUB..."
+# Ensure mirrorlist and pacman.conf are set BEFORE chroot
+mkdir -p "$MOUNT_DIR/etc/pacman.d"
+printf 'Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch\nServer = https://mirrors.edge.kernel.org/archlinux/$repo/os/$arch\nServer = https://geo.mirror.pkgbuild.com/$repo/os/$arch\n' > "$MOUNT_DIR/etc/pacman.d/mirrorlist"
+grep -q "^\\[core\\]" "$MOUNT_DIR/etc/pacman.conf" || printf "\n[core]\nInclude = /etc/pacman.d/mirrorlist\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n" >> "$MOUNT_DIR/etc/pacman.conf"
+
 arch-chroot "$MOUNT_DIR" /bin/bash -c '
-    if [ ! -s /etc/pacman.d/mirrorlist ] || ! grep -q "mirror.rackspace.com" /etc/pacman.d/mirrorlist; then
-        printf "Server = https://mirror.rackspace.com/archlinux/\$repo/os/\$arch\nServer = https://mirrors.edge.kernel.org/archlinux/\$repo/os/\$arch\nServer = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch\n" > /etc/pacman.d/mirrorlist
-    fi
-    grep -q "^\\[core\\]" /etc/pacman.conf || printf "\n[core]\nInclude = /etc/pacman.d/mirrorlist\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
+    pacman-key --init
+    pacman-key --populate archlinux
     pacman -Sy --noconfirm
     pacman -S --noconfirm grub efibootmgr || exit 1
     [ -r /boot/vmlinuz-linux ] || { echo "Kernel not readable, reinstalling..."; pacman -S --noconfirm --overwrite \* linux linux-firmware || exit 1; }
