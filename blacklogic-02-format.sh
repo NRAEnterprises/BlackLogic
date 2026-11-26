@@ -147,9 +147,6 @@ detect_firmware() {
 # Interactive drive selection
 select_drives_to_format() {
     local -a ALL_DRIVES=()
-    local -a EMPTY_DRIVES=()
-    local -a DATA_DRIVES=()
-    local -a SELECTED=()
 
     # Gather all eligible drives
     while IFS= read -r DEV_NAME; do
@@ -170,52 +167,59 @@ select_drives_to_format() {
         fi
 
         local SIZE_HR=$(lsblk -bdno SIZE "$DEV" 2>/dev/null | numfmt --to=iec 2>/dev/null || echo "${SIZE}B")
-
-        if [ "$HAS_DATA" -eq 1 ]; then
-            DATA_DRIVES+=("$DEV_NAME|$SIZE_HR|has data")
-        else
-            EMPTY_DRIVES+=("$DEV_NAME|$SIZE_HR|empty")
-        fi
+        local STATUS="empty"
+        [ "$HAS_DATA" -eq 1 ] && STATUS="has data"
+        ALL_DRIVES+=("$DEV_NAME|$SIZE_HR|$STATUS")
     done < <(lsblk -J -b -o NAME,TYPE 2>/dev/null | jq -r '.blockdevices[]? | select(.type=="disk") | select(.name|startswith("zram")|not) | select(.name|startswith("loop")|not) | .name')
 
-    # Auto-add empty drives to selection
-    for entry in "${EMPTY_DRIVES[@]}"; do
-        SELECTED+=("$entry")
-    done
-
-    # If there are data drives, ask about them
-    if [ "${#DATA_DRIVES[@]}" -gt 0 ]; then
-        echo "=== Drive Selection ==="
-        echo "The following drives have data:"
-        echo ""
-        local i=1
-        for entry in "${DATA_DRIVES[@]}"; do
-            IFS='|' read -r DEV_NAME SIZE_HR STATUS <<< "$entry"
-            echo "  $i) /dev/$DEV_NAME ($SIZE_HR) - $STATUS"
-            i=$((i + 1))
-        done
-        echo ""
-        echo "Enter the numbers of drives to format (space-separated, or 'none' to skip):"
-        read -r -a INPUT_SEL < /dev/tty
-
-        for sel in "${INPUT_SEL[@]}"; do
-            if [ "$sel" = "none" ]; then
-                break
-            fi
-            if [[ "$sel" =~ ^[0-9]+$ ]] && [ "$sel" -ge 1 ] && [ "$sel" -le "${#DATA_DRIVES[@]}" ]; then
-                SELECTED+=("${DATA_DRIVES[$((sel-1))]}")
-            fi
-        done
+    if [ "${#ALL_DRIVES[@]}" -eq 0 ]; then
+        echo "No eligible drives found."
+        exit 0
     fi
 
+    # All drives selected by default
+    local -a SELECTED=("${ALL_DRIVES[@]}")
+
+    echo "=== Drive Selection ==="
+    echo "ALL drives are selected by default. Enter numbers to DESELECT (space-separated)."
+    echo "Press Enter to use ALL drives, or 'none' to skip all."
+    echo ""
+    local i=1
+    for entry in "${ALL_DRIVES[@]}"; do
+        IFS='|' read -r DEV_NAME SIZE_HR STATUS <<< "$entry"
+        echo "  $i) /dev/$DEV_NAME ($SIZE_HR) - $STATUS [SELECTED]"
+        i=$((i + 1))
+    done
+    echo ""
+    echo "Enter numbers to DESELECT (or press Enter for all):"
+    read -r -a INPUT_SEL < /dev/tty
+
+    # Process deselection
+    if [ "${#INPUT_SEL[@]}" -gt 0 ] && [ "${INPUT_SEL[0]}" != "none" ]; then
+        for sel in "${INPUT_SEL[@]}"; do
+            if [[ "$sel" =~ ^[0-9]+$ ]] && [ "$sel" -ge 1 ] && [ "$sel" -le "${#ALL_DRIVES[@]}" ]; then
+                local idx=$((sel - 1))
+                SELECTED[$idx]=""
+            fi
+        done
+    elif [ "${#INPUT_SEL[@]}" -gt 0 ] && [ "${INPUT_SEL[0]}" = "none" ]; then
+        SELECTED=()
+    fi
+
+    # Filter out deselected
+    local -a FINAL_SELECTED=()
+    for entry in "${SELECTED[@]}"; do
+        [ -n "$entry" ] && FINAL_SELECTED+=("$entry")
+    done
+
     # If no drives selected, exit
-    if [ "${#SELECTED[@]}" -eq 0 ]; then
+    if [ "${#FINAL_SELECTED[@]}" -eq 0 ]; then
         echo "No drives selected for formatting."
         exit 0
     fi
 
     # Save selection
-    printf '%s\n' "${SELECTED[@]}" > /tmp/blacklogic-selected-drives
+    printf '%s\n' "${FINAL_SELECTED[@]}" > /tmp/blacklogic-selected-drives
 }
 
 echo "=== Stage 2: Drive Formatting ==="
